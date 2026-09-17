@@ -1,11 +1,12 @@
 """主窗口：变更列表勾选 + AI 生成 + 提交。"""
 
+import os
 import re
 import unicodedata
 from pathlib import Path
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QKeySequence, QShortcut
+from PySide6.QtCore import QEvent, Qt
+from PySide6.QtGui import QColor, QFontMetrics, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -16,6 +17,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
+    QSizePolicy,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -24,6 +26,7 @@ from PySide6.QtWidgets import (
 
 from ..core import ai, repo
 from ..core.config import load_config
+from . import theme
 from .worker import FunctionWorker
 
 REFRESH = "refresh"
@@ -34,6 +37,10 @@ COMMIT = "commit"
 _ERROR_SUMMARY_LIMIT = 120
 # QMessageBox 不会自动换行，按显示列宽预先折行，把对话框宽度限制在合理范围。
 _DIALOG_WRAP_COLUMNS = 38
+
+#: 窗口最小尺寸，保证头部与表格在窄窗口下仍然可用。
+_MIN_WINDOW_WIDTH = 560
+_MIN_WINDOW_HEIGHT = 420
 
 
 def _char_width(char: str) -> int:
@@ -104,18 +111,47 @@ def _error_summary(message: str) -> str:
     return first_line[:_ERROR_SUMMARY_LIMIT] + "…"
 
 
+def _elide_label(label: QLabel, text: str) -> None:
+    """按标签当前宽度做中间省略，并把完整文本放进 tooltip。"""
+    metrics = QFontMetrics(label.font())
+    width = max(label.width(), 60)
+    label.setText(metrics.elidedText(text, Qt.TextElideMode.ElideMiddle, width))
+    label.setToolTip(text)
+
+
+class _SignalsBlocked:
+    """临时屏蔽某个控件的信号，避免批量填表时逐项触发汇总刷新。"""
+
+    def __init__(self, widget: QWidget):
+        self._widget = widget
+        self._previous = False
+
+    def __enter__(self):
+        self._previous = self._widget.blockSignals(True)
+        return self
+
+    def __exit__(self, *exc) -> bool:
+        self._widget.blockSignals(self._previous)
+        return False
+
+
 #: 变更表格的列（首列内含勾选框与路径，与 TortoiseGit 的「检查修改」一致）。
 _TABLE_COLUMNS = ("路径", "扩展名", "状态", "添加行数", "删除行数")
 
-#: 「选中：」过滤链接行。已添加/已删除/已修改为「累加勾选」，不会取消其它勾选。
-_FILTER_HTML = (
-    "选中： "
-    '<a href="all">全部(A)</a> '
-    '<a href="none">无(N)</a> '
-    '<a href="added">已添加</a> '
-    '<a href="deleted">已删除</a> '
-    '<a href="modified">已修改</a>'
+#: 数字列右对齐，读起来才能按位比较。
+_RIGHT_ALIGNED_COLUMNS = (3, 4)
+
+#: 「选中：」过滤按钮。已添加/已删除/已修改为「累加勾选」，不会取消其它勾选。
+_FILTERS = (
+    ("all", "全部(A)", "勾选列表中的全部文件"),
+    ("none", "无(N)", "取消全部勾选"),
+    ("added", "已添加", "勾选所有「已添加」的文件，不取消其它勾选"),
+    ("deleted", "已删除", "勾选所有「已删除」的文件，不取消其它勾选"),
+    ("modified", "已修改", "勾选所有「已修改 / 已重命名」的文件，不取消其它勾选"),
 )
+
+_EMPTY_CLEAN = "工作区干净\n没有需要提交的改动"
+_EMPTY_FILTERED = "未显示任何文件\n可勾选「显示未受版本控制的文件」后再看"
 
 
 def _stat_text(value: int | None) -> str:
@@ -131,81 +167,186 @@ class MainWindow(QMainWindow):
         self._worker: FunctionWorker | None = None
         self._operation: str | None = None
         self._pending_refresh = False
+        self._busy = False
         self._changes: list[repo.FileChange] = []
         self._stats: dict = {}
+        self._repo_path = os.path.normpath(repo_root)
+        self._repo_name = Path(self._repo_path).name or self._repo_path
 
-        self.setWindowTitle("AI 提交")
+        self.setWindowTitle(f"{self._repo_name} — AI 提交")
         size = self.config.get("ui", {})
         self.resize(size.get("window_width", 720), size.get("window_height", 520))
+        self.setMinimumSize(_MIN_WINDOW_WIDTH, _MIN_WINDOW_HEIGHT)
         self._build_ui()
         self.refresh()
 
+    # --- 界面搭建 ---
+
     def _build_ui(self) -> None:
+        self.setWindowIcon(theme.app_icon())
+
         central = QWidget(self)
+        central.setObjectName("central")
         layout = QVBoxLayout(central)
+        layout.setContentsMargins(*theme.WINDOW_MARGINS)
+        layout.setSpacing(theme.LAYOUT_SPACING)
 
-        self.header = QLabel(f"仓库：{self.repo_root}")
-        self.header.setWordWrap(True)
-        layout.addWidget(self.header)
+        self.status = QLabel("就绪")
+        self.status.setObjectName("statusLabel")
+        self.status.setWordWrap(True)
 
-        self.branch_label = QLabel("分支：读取中…")
-        self.branch_label.setWordWrap(True)
-        layout.addWidget(self.branch_label)
+        layout.addLayout(self._build_header())
 
-        # 提交信息（日志）在上，变更列表在下，与 TortoiseGit 提交窗口一致。
-        layout.addWidget(QLabel("提交信息"))
+        message_label = QLabel("提交信息")
+        message_label.setObjectName("sectionLabel")
+        layout.addWidget(message_label)
+
         self.message_edit = QPlainTextEdit()
+        self.message_edit.setPlaceholderText("填写提交信息，或用「AI 生成」按改动生成")
+        self.message_edit.textChanged.connect(self._update_summary)
         layout.addWidget(self.message_edit, 2)
 
-        layout.addWidget(QLabel("变更列表（F5 键刷新）："))
+        layout.addLayout(self._build_list_header())
 
-        self.filter_label = QLabel(_FILTER_HTML)
-        self.filter_label.setTextFormat(Qt.RichText)
-        self.filter_label.setWordWrap(True)
-        self.filter_label.linkActivated.connect(self._apply_filter)
-        layout.addWidget(self.filter_label)
-
-        self.changes_table = QTableWidget(0, len(_TABLE_COLUMNS))
-        self.changes_table.setHorizontalHeaderLabels(list(_TABLE_COLUMNS))
-        self.changes_table.verticalHeader().setVisible(False)
-        self.changes_table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.changes_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.changes_table.setAlternatingRowColors(True)
-        table_header = self.changes_table.horizontalHeader()
-        # 列尽量靠左排布：路径列用固定初始宽度，其余按内容收紧，右侧留白。
-        table_header.setStretchLastSection(False)
-        table_header.setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        table_header.setSectionResizeMode(0, QHeaderView.Interactive)
-        self.changes_table.setColumnWidth(0, 340)
-        for column in range(1, len(_TABLE_COLUMNS)):
-            table_header.setSectionResizeMode(column, QHeaderView.ResizeToContents)
+        self.changes_table = self._build_table()
         layout.addWidget(self.changes_table, 3)
 
+        self.empty_state = QLabel(self.changes_table.viewport())
+        self.empty_state.setObjectName("emptyState")
+        self.empty_state.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.empty_state.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self.empty_state.hide()
+        self.changes_table.viewport().installEventFilter(self)
+
         self.show_untracked_check = QCheckBox("显示未受版本控制的文件(U)")
+        self.show_untracked_check.setToolTip("关闭后未跟踪文件不显示，也不会被提交")
         self.show_untracked_check.setChecked(True)
         self.show_untracked_check.toggled.connect(lambda _checked: self._render_rows())
         layout.addWidget(self.show_untracked_check)
 
-        actions = QHBoxLayout()
-        self.btn_generate = QPushButton("AI 生成")
-        self.btn_cancel = QPushButton("取消")
-        self.btn_commit = QPushButton("提交")
-        self.btn_cancel.setEnabled(False)
-        self.btn_generate.clicked.connect(self.on_generate)
-        self.btn_cancel.clicked.connect(self.on_cancel)
-        self.btn_commit.clicked.connect(self.on_commit)
-        actions.addWidget(self.btn_generate)
-        actions.addWidget(self.btn_cancel)
-        actions.addStretch(1)
-        actions.addWidget(self.btn_commit)
-        layout.addLayout(actions)
-
-        self.status = QLabel("就绪")
-        self.status.setWordWrap(True)
+        layout.addLayout(self._build_actions())
         layout.addWidget(self.status)
 
         self.setCentralWidget(central)
         self._install_shortcuts()
+        self._update_summary()
+
+    def _build_header(self) -> QHBoxLayout:
+        self.repo_name_label = QLabel(self._repo_name)
+        self.repo_name_label.setObjectName("repoName")
+        self.repo_name_label.setToolTip(self._repo_path)
+        self.repo_name_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+
+        self.repo_path_label = QLabel(self._repo_path)
+        self.repo_path_label.setObjectName("repoPath")
+        self.repo_path_label.setToolTip(self._repo_path)
+        self.repo_path_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.repo_path_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+
+        titles = QVBoxLayout()
+        titles.setSpacing(0)
+        titles.addWidget(self.repo_name_label)
+        titles.addWidget(self.repo_path_label)
+
+        branch_caption = QLabel("分支")
+        branch_caption.setObjectName("hintLabel")
+
+        self.branch_label = QLabel(repo.UNKNOWN_BRANCH)
+        self.branch_label.setObjectName("branchChip")
+        self.branch_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.branch_label.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+
+        row = QHBoxLayout()
+        row.setSpacing(theme.SPACE_XS)
+        row.addLayout(titles, 1)
+        row.addWidget(branch_caption, 0, Qt.AlignmentFlag.AlignVCenter)
+        row.addWidget(self.branch_label, 0, Qt.AlignmentFlag.AlignVCenter)
+        return row
+
+    def _build_list_header(self) -> QHBoxLayout:
+        caption = QLabel("变更列表")
+        caption.setObjectName("sectionLabel")
+
+        pick = QLabel("选中")
+        pick.setObjectName("hintLabel")
+
+        row = QHBoxLayout()
+        row.setSpacing(theme.SPACE_XS)
+        row.addWidget(caption)
+        row.addSpacing(theme.SPACE_SM)
+        row.addWidget(pick)
+
+        self.filter_buttons: dict[str, QPushButton] = {}
+        for key, text, tip in _FILTERS:
+            button = QPushButton(text)
+            button.setObjectName("chip")
+            button.setToolTip(tip)
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            button.clicked.connect(lambda _checked=False, name=key: self._apply_filter(name))
+            self.filter_buttons[key] = button
+            row.addWidget(button)
+
+        row.addStretch(1)
+        hint = QLabel("F5 刷新")
+        hint.setObjectName("hintLabel")
+        row.addWidget(hint)
+        return row
+
+    def _build_table(self) -> QTableWidget:
+        table = QTableWidget(0, len(_TABLE_COLUMNS))
+        table.setHorizontalHeaderLabels(list(_TABLE_COLUMNS))
+        table.verticalHeader().setVisible(False)
+        table.verticalHeader().setDefaultSectionSize(theme.TABLE_ROW_HEIGHT)
+        table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        table.setAlternatingRowColors(theme.TABLE_ZEBRA)
+        table.setShowGrid(theme.TABLE_GRID)
+        table.setWordWrap(False)
+        table.setTextElideMode(Qt.TextElideMode.ElideMiddle)
+        table.setMouseTracking(True)
+        table.setCornerButtonEnabled(False)
+        table.itemChanged.connect(lambda _item: self._update_summary())
+
+        header = table.horizontalHeader()
+        # 列尽量靠左排布：路径列用固定初始宽度，其余按内容收紧，右侧留白。
+        header.setStretchLastSection(False)
+        header.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        header.setHighlightSections(False)
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
+        table.setColumnWidth(0, 340)
+        for column in range(1, len(_TABLE_COLUMNS)):
+            header.setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
+        for column in _RIGHT_ALIGNED_COLUMNS:
+            item = table.horizontalHeaderItem(column)
+            if item is not None:
+                item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        return table
+
+    def _build_actions(self) -> QHBoxLayout:
+        self.btn_generate = QPushButton("AI 生成")
+        self.btn_generate.setToolTip("根据勾选的改动调用 AI 生成提交信息")
+        self.btn_cancel = QPushButton("取消")
+        self.btn_cancel.setToolTip("取消正在进行的 AI 生成")
+        self.btn_commit = QPushButton("提交")
+        self.btn_commit.setObjectName("primaryButton")
+        self.btn_commit.setMinimumWidth(104)
+        self.btn_cancel.setEnabled(False)
+        self.btn_generate.clicked.connect(self.on_generate)
+        self.btn_cancel.clicked.connect(self.on_cancel)
+        self.btn_commit.clicked.connect(self.on_commit)
+
+        self.action_hint = QLabel()
+        self.action_hint.setObjectName("hintLabel")
+
+        row = QHBoxLayout()
+        row.setSpacing(theme.SPACE_SM)
+        row.addWidget(self.btn_generate)
+        row.addWidget(self.btn_cancel)
+        row.addWidget(self.action_hint)
+        row.addStretch(1)
+        row.addWidget(self.btn_commit)
+        return row
 
     def _install_shortcuts(self) -> None:
         refresh_shortcut = QShortcut(QKeySequence("F5"), self)
@@ -213,11 +354,40 @@ class MainWindow(QMainWindow):
         # A/N 仅在表格获得焦点时生效，避免与「提交信息」输入框冲突。
         for key, kind in (("A", "all"), ("N", "none")):
             shortcut = QShortcut(QKeySequence(key), self.changes_table)
-            shortcut.setContext(Qt.WidgetShortcut)
+            shortcut.setContext(Qt.ShortcutContext.WidgetShortcut)
             shortcut.activated.connect(lambda name=kind: self._apply_filter(name))
         toggle_untracked = QShortcut(QKeySequence("U"), self.changes_table)
-        toggle_untracked.setContext(Qt.WidgetShortcut)
+        toggle_untracked.setContext(Qt.ShortcutContext.WidgetShortcut)
         toggle_untracked.activated.connect(self.show_untracked_check.toggle)
+
+    # --- 头部与空状态 ---
+
+    def _elide_header(self) -> None:
+        _elide_label(self.repo_name_label, self._repo_name)
+        _elide_label(self.repo_path_label, self._repo_path)
+
+    def _position_empty_state(self) -> None:
+        self.empty_state.setGeometry(self.changes_table.viewport().rect())
+
+    def _update_empty_state(self) -> None:
+        """表格没有可见行时给出解释，而不是留一片空白。"""
+        if self.changes_table.rowCount():
+            self.empty_state.hide()
+            return
+        self.empty_state.setText(_EMPTY_CLEAN if not self._changes else _EMPTY_FILTERED)
+        self._position_empty_state()
+        self.empty_state.show()
+        self.empty_state.raise_()
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 - Qt 命名
+        super().resizeEvent(event)
+        self._elide_header()
+        self._position_empty_state()
+
+    def eventFilter(self, obj, event) -> bool:  # noqa: N802 - Qt 命名
+        if obj is self.changes_table.viewport() and event.type() == QEvent.Type.Resize:
+            self._position_empty_state()
+        return super().eventFilter(obj, event)
 
     # --- 数据 ---
 
@@ -243,21 +413,26 @@ class MainWindow(QMainWindow):
         )
 
     def _on_snapshot_loaded(self, snapshot: dict) -> None:
-        self.branch_label.setText(f"分支：{snapshot.get('branch') or repo.UNKNOWN_BRANCH}")
+        self._set_branch(snapshot.get("branch") or repo.UNKNOWN_BRANCH)
         self._on_changes_loaded(snapshot.get("changes") or [], snapshot.get("stats") or {})
+
+    def _set_branch(self, branch: str) -> None:
+        self.branch_label.setText(branch)
+        self.branch_label.setToolTip(f"当前分支：{branch}")
 
     def _on_changes_loaded(self, changes, stats=None) -> None:
         self._changes = list(changes)
         self._stats = dict(stats or {})
         # 全新加载：清空旧行，勾选状态按默认策略重来。
-        self.changes_table.setRowCount(0)
+        with _SignalsBlocked(self.changes_table):
+            self.changes_table.setRowCount(0)
         self._render_rows()
 
     def _render_rows(self) -> None:
         """按当前「显示未受版本控制的文件」开关渲染表格，保留已存在的勾选状态。"""
         previous: dict[str, object] = {}
         for _, item in self._table_rows():
-            change = item.data(Qt.UserRole)
+            change = item.data(Qt.ItemDataRole.UserRole)
             if change is not None:
                 previous[change.path] = item.checkState()
 
@@ -269,45 +444,68 @@ class MainWindow(QMainWindow):
             if show_untracked or change.status != repo.UNTRACKED
         ]
 
-        self.changes_table.setRowCount(0)
-        for change in visible:
-            row = self.changes_table.rowCount()
-            self.changes_table.insertRow(row)
+        with _SignalsBlocked(self.changes_table):
+            self.changes_table.setRowCount(0)
+            for change in visible:
+                row = self.changes_table.rowCount()
+                self.changes_table.insertRow(row)
+                self._fill_row(row, change, previous.get(change.path), checked_default)
 
-            path_item = QTableWidgetItem(change.path)
-            path_item.setData(Qt.UserRole, change)
-            state = previous.get(change.path)
-            if state is None:
-                if checked_default == "all":
-                    state = Qt.Checked
-                elif checked_default == "none":
-                    state = Qt.Unchecked
-                else:
-                    state = Qt.Unchecked if change.status == repo.UNTRACKED else Qt.Checked
-            path_item.setCheckState(state)
-            self.changes_table.setItem(row, 0, path_item)
-
-            has_stat = change.path in self._stats
-            added, deleted = self._stats.get(change.path, (None, None))
-            cells = [
-                Path(change.path).suffix,
-                repo.STATUS_TEXT.get(change.status, change.status),
-                _stat_text(added) if has_stat else "",
-                _stat_text(deleted) if has_stat else "",
-            ]
-            for offset, text in enumerate(cells, start=1):
-                self.changes_table.setItem(row, offset, QTableWidgetItem(text))
-
-        self.status.setText(f"共 {len(visible)} 个变更")
-        self.btn_commit.setEnabled(bool(visible))
         if not visible:
             self.message_edit.setPlainText("")
+        self._update_summary()
+
+    def _fill_row(self, row: int, change: repo.FileChange, state, checked_default: str) -> None:
+        """填一行：首列勾选框 + 路径，其余列按语义上色、数字列右对齐。"""
+        path_item = QTableWidgetItem(change.path)
+        path_item.setData(Qt.ItemDataRole.UserRole, change)
+        path_item.setToolTip(change.path)
+        path_item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        if state is None:
+            if checked_default == "all":
+                state = Qt.CheckState.Checked
+            elif checked_default == "none":
+                state = Qt.CheckState.Unchecked
+            else:
+                state = (
+                    Qt.CheckState.Unchecked
+                    if change.status == repo.UNTRACKED
+                    else Qt.CheckState.Checked
+                )
+        path_item.setCheckState(state)
+        self.changes_table.setItem(row, 0, path_item)
+
+        has_stat = change.path in self._stats
+        added, deleted = self._stats.get(change.path, (None, None))
+
+        suffix_item = QTableWidgetItem(Path(change.path).suffix)
+        suffix_item.setForeground(QColor(theme.TEXT_MUTED))
+        suffix_item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+
+        status_item = QTableWidgetItem(repo.STATUS_TEXT.get(change.status, change.status))
+        status_item.setForeground(theme.status_color(change.status))
+        status_item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+
+        cells = (
+            suffix_item,
+            status_item,
+            QTableWidgetItem(_stat_text(added) if has_stat else ""),
+            QTableWidgetItem(_stat_text(deleted) if has_stat else ""),
+        )
+        for offset, item in enumerate(cells, start=1):
+            if offset in _RIGHT_ALIGNED_COLUMNS:
+                item.setTextAlignment(
+                    Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+                )
+                item.setForeground(QColor(theme.TEXT_MUTED))
+            self.changes_table.setItem(row, offset, item)
 
     def _on_refresh_failed(self, message: str) -> None:
         self._changes = []
         self._stats = {}
-        self.changes_table.setRowCount(0)
-        self.btn_commit.setEnabled(False)
+        with _SignalsBlocked(self.changes_table):
+            self.changes_table.setRowCount(0)
+        self._update_summary()
         self._error(f"读取变更失败：{message}")
 
     def _table_rows(self):
@@ -322,8 +520,8 @@ class MainWindow(QMainWindow):
     def checked_paths(self) -> list[str]:
         paths = []
         for _, item in self._table_rows():
-            if item.checkState() == Qt.Checked:
-                change = item.data(Qt.UserRole)
+            if item.checkState() == Qt.CheckState.Checked:
+                change = item.data(Qt.ItemDataRole.UserRole)
                 paths.append(change.path if change is not None else item.text())
         return paths
 
@@ -336,13 +534,40 @@ class MainWindow(QMainWindow):
         """提交用 pathspec：重命名同时包含新旧路径，避免旧路径删除被遗留。"""
         return repo.commit_pathspecs(self.checked_changes())
 
+    # --- 汇总与选择 ---
+
+    def _set_status(self, text: str, error: bool = False) -> None:
+        self.status.setText(text)
+        self.status.setStyleSheet(f"color: {theme.DANGER};" if error else "")
+
+    def _update_summary(self) -> None:
+        """统一刷新状态栏、空状态与按钮可用性，避免各处各写一套。"""
+        total = self.changes_table.rowCount()
+        selected = len(self.checked_paths())
+        if not self._busy:
+            self._set_status(f"共 {total} 个变更 · 已选 {selected}")
+        self._update_empty_state()
+
+        blocked = ""
+        if not total:
+            blocked = ""  # 没有变更时无事可做，不必催促勾选
+        elif not selected:
+            blocked = "请先勾选要提交的文件"
+        elif not self.message_edit.toPlainText().strip():
+            blocked = "请填写提交信息"
+        self.action_hint.setText(blocked)
+        self.btn_commit.setToolTip(blocked)
+        self.btn_commit.setEnabled(not blocked and not self._busy)
+
     def _set_all(self, checked: bool) -> None:
-        state = Qt.Checked if checked else Qt.Unchecked
-        for _, item in self._table_rows():
-            item.setCheckState(state)
+        state = Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked
+        with _SignalsBlocked(self.changes_table):
+            for _, item in self._table_rows():
+                item.setCheckState(state)
+        self._update_summary()
 
     def _apply_filter(self, kind: str) -> None:
-        """「选中：」链接。
+        """「选中：」按钮。
 
         全部/无 直接全勾/全不勾；已添加/已删除/已修改 只做「累加勾选」，
         不会取消其它已勾选项。
@@ -360,10 +585,12 @@ class MainWindow(QMainWindow):
         }.get(kind, set())
         if not wanted:
             return
-        for _, item in self._table_rows():
-            change = item.data(Qt.UserRole)
-            if change is not None and change.status in wanted:
-                item.setCheckState(Qt.Checked)
+        with _SignalsBlocked(self.changes_table):
+            for _, item in self._table_rows():
+                change = item.data(Qt.ItemDataRole.UserRole)
+                if change is not None and change.status in wanted:
+                    item.setCheckState(Qt.CheckState.Checked)
+        self._update_summary()
 
     # --- 动作 ---
 
@@ -411,7 +638,7 @@ class MainWindow(QMainWindow):
         # 仅 AI 生成可取消；提交一旦开始必须跑完，取消会隐藏真实发生的提交。
         if self._worker is not None and self._operation == GENERATE:
             self._worker.cancel()
-            self.status.setText("已取消")
+            self._set_status("已取消")
 
     # --- 线程辅助 ---
 
@@ -429,7 +656,7 @@ class MainWindow(QMainWindow):
             return
         self._operation = operation
         self._set_busy(True, cancellable)
-        self.status.setText(start_text)
+        self._set_status(start_text)
         worker = FunctionWorker(fn)
         worker.succeeded.connect(on_success)
         worker.failed.connect(on_failure or self._error)
@@ -446,9 +673,10 @@ class MainWindow(QMainWindow):
             self.refresh()
 
     def _set_busy(self, busy: bool, cancellable: bool = False) -> None:
+        self._busy = busy
         self.btn_generate.setEnabled(not busy)
-        self.btn_commit.setEnabled(not busy and bool(self._changes))
         self.btn_cancel.setEnabled(busy and cancellable)
+        self._update_summary()
 
     def closeEvent(self, event) -> None:  # noqa: N802 - Qt 命名
         worker = self._worker
@@ -458,7 +686,7 @@ class MainWindow(QMainWindow):
             # 因此改为忽略本次关闭，由正常完成回调报告结果。
             if self._operation == COMMIT:
                 event.ignore()
-                self.status.setText("正在提交，请稍候…")
+                self._set_status("正在提交，请稍候…")
                 return
             # 仅 AI 生成可取消；提交一旦开始必须跑完，取消会隐藏真实发生的提交。
             if self._operation == GENERATE:
@@ -470,22 +698,22 @@ class MainWindow(QMainWindow):
 
     def _on_generated(self, text: str) -> None:
         self.message_edit.setPlainText(text)
-        self.status.setText("已生成，可编辑后提交")
+        self._set_status("已生成，可编辑后提交")
 
     def _on_committed(self, output: str) -> None:
-        self.status.setText("提交成功")
+        self._set_status("提交成功")
         QMessageBox.information(self, "AI 提交", "提交成功")
         self.refresh()
 
     def _build_error_box(self, message: str) -> QMessageBox:
         """错误对话框：只显示短摘要，完整信息放进可滚动详情，避免撑宽窗口。"""
         box = QMessageBox(self)
-        box.setIcon(QMessageBox.Warning)
+        box.setIcon(QMessageBox.Icon.Warning)
         box.setWindowTitle("AI 提交")
         box.setText(_wrap_for_dialog(_error_summary(message)))
         box.setDetailedText(message)
         return box
 
     def _error(self, message: str) -> None:
-        self.status.setText(f"错误：{_error_summary(message)}")
+        self._set_status(f"错误：{_error_summary(message)}", error=True)
         self._build_error_box(message).exec()

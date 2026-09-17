@@ -32,21 +32,38 @@ def test_light_palette_disabled_text_is_grey(qapp):
 def test_apply_light_theme_forces_light_colors(qapp):
     original_qss = qapp.styleSheet()
     original_palette = qapp.palette()
+    original_font = qapp.font()
     try:
         theme.apply_light_theme(qapp)
 
-        assert qapp.styleSheet() == theme.LIGHT_QSS
+        assert qapp.styleSheet() == theme.stylesheet()
         assert qapp.palette().color(QPalette.ColorRole.Base).name() == "#ffffff"
         assert qapp.palette().color(QPalette.ColorRole.Window).lightness() > 200
+        assert qapp.font().families()[0] == "Microsoft YaHei UI"
     finally:
         qapp.setStyleSheet(original_qss)
         qapp.setPalette(original_palette)
+        qapp.setFont(original_font)
 
 
 def test_light_qss_targets_white(qapp):
-    assert theme.LIGHT_QSS.strip()
-    assert "background: #ffffff" in theme.LIGHT_QSS
-    assert "background: #1" not in theme.LIGHT_QSS
+    qss = theme.stylesheet()
+
+    assert qss.strip()
+    assert "background: #ffffff" in qss
+    assert "#000000" not in qss
+    assert "QPushButton#primaryButton" in qss
+
+
+def test_tokens_stay_on_scale(qapp):
+    """间距刻度必须成体系，避免界面出现一次性数值。"""
+    spaces = (theme.SPACE_XS, theme.SPACE_SM, theme.SPACE_MD, theme.SPACE_LG, theme.SPACE_XL)
+
+    assert spaces == tuple(sorted(spaces))
+    assert all(value % 4 == 0 for value in spaces)
+    assert theme.status_color("added").name() == theme.SUCCESS
+    assert theme.status_color("deleted").name() == theme.DANGER
+    assert theme.status_color("unknown-status").name() == theme.TEXT
 
 
 def test_main_applies_light_theme(monkeypatch):

@@ -17,6 +17,7 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 from app.core import repo  # noqa: E402
 from app.core.config import DEFAULT_CONFIG  # noqa: E402
 from app.ui import main_window as mw  # noqa: E402
+from app.ui import theme  # noqa: E402
 
 
 @pytest.fixture(scope="module")
@@ -171,13 +172,13 @@ def test_filter_links_are_additive(qapp, tmp_path, monkeypatch):
     assert window.checked_paths() == []
 
 
-def test_filter_html_drops_untracked_link(qapp, tmp_path, monkeypatch):
+def test_filter_chips_drop_untracked_link(qapp, tmp_path, monkeypatch):
     window = _make_window(tmp_path, monkeypatch)
-    html = window.filter_label.text()
+    labels = [button.text() for button in window.filter_buttons.values()]
 
-    assert "untracked" not in html
-    assert "未版本控制" not in html
-    assert "已添加" in html and "已删除" in html and "已修改" in html
+    assert set(window.filter_buttons) == {"all", "none", "added", "deleted", "modified"}
+    assert not any("未版本控制" in text for text in labels)
+    assert labels == ["全部(A)", "无(N)", "已添加", "已删除", "已修改"]
 
 
 def test_untracked_rows_can_be_hidden(qapp, tmp_path, monkeypatch):
@@ -292,3 +293,86 @@ def test_checked_commit_paths_includes_rename_orig(qapp, tmp_path, monkeypatch):
     window._on_changes_loaded(repo.list_changes(tmp_path))
 
     assert set(window.checked_commit_paths()) == {"new.txt", "old.txt"}
+
+
+def test_header_shows_repo_name_and_branch_chip(qapp, tmp_path, monkeypatch):
+    window = _make_window(tmp_path, monkeypatch)
+    window._on_snapshot_loaded({"branch": "trunk", "changes": []})
+
+    assert window.repo_name_label.text() == tmp_path.name
+    assert window.branch_label.text() == "trunk"
+    assert "trunk" in window.branch_label.toolTip()
+
+
+def test_status_counts_selected(qapp, tmp_path, monkeypatch):
+    window = _make_window(tmp_path, monkeypatch)
+    window._on_changes_loaded(_changes_fixture())
+
+    assert "共 4 个变更" in window.status.text()
+    assert "已选 3" in window.status.text()
+
+    window._apply_filter("none")
+    assert "已选 0" in window.status.text()
+
+
+def test_commit_needs_selection_and_message(qapp, tmp_path, monkeypatch):
+    window = _make_window(tmp_path, monkeypatch)
+    window._on_changes_loaded(_changes_fixture())
+
+    assert window.btn_commit.isEnabled() is False
+    assert window.btn_commit.toolTip() == "请填写提交信息"
+
+    window.message_edit.setPlainText("feat: x")
+    assert window.btn_commit.isEnabled() is True
+    assert window.btn_commit.toolTip() == ""
+
+    window._apply_filter("none")
+    assert window.btn_commit.isEnabled() is False
+    assert window.btn_commit.toolTip() == "请先勾选要提交的文件"
+
+
+def test_empty_state_explains_clean_and_filtered(qapp, tmp_path, monkeypatch):
+    window = _make_window(tmp_path, monkeypatch)
+
+    window._on_changes_loaded([])
+    assert not window.empty_state.isHidden()
+    assert "工作区干净" in window.empty_state.text()
+    # 没有变更时不催促勾选
+    assert window.action_hint.text() == ""
+
+    window._on_changes_loaded(_changes_fixture())
+    assert window.empty_state.isHidden()
+
+    window.show_untracked_check.setChecked(False)
+    window._on_changes_loaded([repo.FileChange(path="n.txt", status=repo.UNTRACKED)])
+    assert not window.empty_state.isHidden()
+    assert "未显示任何文件" in window.empty_state.text()
+
+
+def test_numeric_columns_right_aligned_and_status_colored(qapp, tmp_path, monkeypatch):
+    window = _make_window(tmp_path, monkeypatch)
+    window._on_changes_loaded(_changes_fixture(), {"a.txt": (2, 1)})
+    table = window.changes_table
+
+    for column in (3, 4):
+        assert table.item(0, column).textAlignment() & int(Qt.AlignmentFlag.AlignRight)
+
+    rows = {table.item(row, 0).text(): row for row in range(table.rowCount())}
+    assert table.item(rows["a.txt"], 2).foreground().color().name() == theme.WARNING
+    assert table.item(rows["gone.txt"], 2).foreground().color().name() == theme.DANGER
+    assert table.item(rows["new.txt"], 2).foreground().color().name() == theme.TEXT_MUTED
+
+
+def test_busy_disables_commit_and_keeps_start_text(qapp, tmp_path, monkeypatch):
+    window = _make_window(tmp_path, monkeypatch)
+    window._on_changes_loaded(_changes_fixture())
+    window.message_edit.setPlainText("feat: x")
+    assert window.btn_commit.isEnabled() is True
+
+    window._set_busy(True, cancellable=True)
+    assert window.btn_commit.isEnabled() is False
+    assert window.btn_generate.isEnabled() is False
+    assert window.btn_cancel.isEnabled() is True
+
+    window._set_busy(False)
+    assert window.btn_commit.isEnabled() is True
