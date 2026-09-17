@@ -309,8 +309,6 @@ class MainWindow(QMainWindow):
         layout.addLayout(self._build_list_header())
 
         self.changes_table = self._build_table()
-        # 至少露出 4 整行，避免默认窗口尺寸下最后一行被截成半行。
-        self.changes_table.setMinimumHeight(theme.TABLE_ROW_HEIGHT * 4 + 40)
         layout.addWidget(self.changes_table, 3)
 
         self.empty_state = QLabel(self.changes_table.viewport())
@@ -403,11 +401,12 @@ class MainWindow(QMainWindow):
         table = ChangesTable(0, len(_TABLE_COLUMNS))
         table.setHorizontalHeaderLabels(list(_TABLE_COLUMNS))
         table.verticalHeader().setVisible(False)
-        table.verticalHeader().setDefaultSectionSize(theme.TABLE_ROW_HEIGHT)
+        # 样式文件里的 QHeaderView#verticalHeader 命中它（行高由样式决定）。
+        table.verticalHeader().setObjectName("verticalHeader")
         table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        table.setAlternatingRowColors(theme.TABLE_ZEBRA)
-        table.setShowGrid(theme.TABLE_GRID)
+        table.setAlternatingRowColors(True)
+        table.setShowGrid(True)
         table.setWordWrap(False)
         table.setTextElideMode(Qt.TextElideMode.ElideMiddle)
         table.setMouseTracking(True)
@@ -484,6 +483,18 @@ class MainWindow(QMainWindow):
         self._position_empty_state()
         self.empty_state.show()
         self.empty_state.raise_()
+
+    def showEvent(self, event) -> None:  # noqa: N802 - Qt 命名
+        super().showEvent(event)
+        # 行高来自样式表，polish 之后才读得到，所以在这里同步最小高度。
+        self._sync_table_min_height()
+
+    def _sync_table_min_height(self) -> None:
+        """表格最小高度跟着样式里的行高走：露出 4 整行，避免最后一行被截半。"""
+        row_height = self.changes_table.verticalHeader().defaultSectionSize()
+        self.changes_table.setMinimumHeight(
+            row_height * theme.TABLE_MIN_VISIBLE_ROWS + theme.TABLE_MIN_HEIGHT_EXTRA
+        )
 
     def resizeEvent(self, event) -> None:  # noqa: N802 - Qt 命名
         super().resizeEvent(event)

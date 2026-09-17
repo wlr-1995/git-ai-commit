@@ -5,6 +5,7 @@ import pytest
 from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import QApplication
 
+from app.core import repo as repo_status
 from app.ui import theme
 
 
@@ -15,6 +16,10 @@ def qapp():
 
 def _styles() -> list[tuple[str, Path]]:
     return [(key, theme.style_path(key)) for key, _label in theme.available_styles()]
+
+
+def repo_change(path: str, status: str):
+    return repo_status.FileChange(path=path, status=status)
 
 
 def test_style_files_are_grayscale(qapp):
@@ -169,3 +174,97 @@ def test_main_applies_light_theme(monkeypatch):
 
     assert main_module.main(["prog", "somewhere"]) == 0
     assert events == ["app-created", ("theme", "FakeApplication"), ("window", "R"), "shown"]
+
+
+@pytest.fixture(autouse=True)
+def _restore_default_style(qapp):
+    """每个用例结束后把应用样式恢复成默认，避免用例之间互相污染。"""
+    yield
+    theme.apply_style(qapp, theme.DEFAULT_STYLE)
+
+
+@pytest.fixture
+def styled_window(qapp, tmp_path, monkeypatch):
+    """按样式建主窗口（不碰真实配置、不后台刷新）。"""
+    import copy
+
+    from app.core.config import DEFAULT_CONFIG
+    from app.ui import main_window as mw
+
+    made: list = []
+
+    def build(style: str):
+        monkeypatch.setattr(mw.MainWindow, "refresh", lambda self: None)
+        monkeypatch.setattr(mw, "load_config", lambda: copy.deepcopy(DEFAULT_CONFIG))
+        theme.apply_style(qapp, style)
+        window = mw.MainWindow(str(tmp_path))
+        window.show()
+        qapp.processEvents()
+        made.append(window)
+        return window
+
+    yield build
+    for window in made:
+        window.close()
+
+
+def _count_color(image, name: str) -> int:
+    from PySide6.QtGui import QColor
+
+    target = QColor(name)
+    total = 0
+    for y in range(image.height()):
+        for x in range(image.width()):
+            if image.pixelColor(x, y).name() == target.name():
+                total += 1
+    return total
+
+
+def test_available_styles_lists_both_styles(qapp):
+    styles = dict(theme.available_styles())
+
+    assert styles["traditional"] == "传统框感"
+    assert styles["flat"] == "扁平"
+    assert theme.available_styles()[0][0] == theme.DEFAULT_STYLE
+
+
+def test_style_owns_row_height(styled_window):
+    """行高由样式文件决定；样式表是全应用级的，装新样式会把已建窗口一起重新 polish，
+    所以建一套、断言一套，不能建完两套再回头读第一套。"""
+    traditional = styled_window("traditional")
+    assert traditional.changes_table.verticalHeader().defaultSectionSize() == 24
+
+    flat = styled_window("flat")
+    assert flat.changes_table.verticalHeader().defaultSectionSize() == 28
+
+
+def test_style_owns_grid_and_zebra(styled_window):
+    changes = [
+        repo_change("a.txt", repo_status.MODIFIED),
+        repo_change("b.txt", repo_status.MODIFIED),
+    ]
+
+    def counts(style: str) -> tuple[int, int]:
+        window = styled_window(style)
+        window.show_untracked_check.setChecked(True)
+        window._on_changes_loaded(changes, {"a.txt": (2, 1), "b.txt": (1, 1)})
+        image = window.changes_table.viewport().grab().toImage()
+        return _count_color(image, "#e6e6e6"), _count_color(image, "#f7f7f7")
+
+    grid, zebra = counts("traditional")
+    assert grid > 100, "传统样式应该有网格线像素"
+    assert zebra > 100, "传统样式应该有斑马纹像素"
+
+    grid, zebra = counts("flat")
+    assert grid == 0, "扁平样式不应该有网格线像素"
+    assert zebra == 0, "扁平样式不应该有斑马纹像素"
+
+
+def test_min_table_height_follows_style(styled_window):
+    for style, expected_row in (("traditional", 24), ("flat", 28)):
+        window = styled_window(style)
+        assert window.changes_table.verticalHeader().defaultSectionSize() == expected_row
+        assert (
+            window.changes_table.minimumHeight()
+            == expected_row * theme.TABLE_MIN_VISIBLE_ROWS + theme.TABLE_MIN_HEIGHT_EXTRA
+        )

@@ -85,10 +85,9 @@ FONT_FAMILIES = ("Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI")
 FONT_SIZE = 9
 FONT_SIZE_SMALL = 8
 
-#: 表格的行高与边框策略（样式文件里以 QSS 表达；这里供 Qt API 使用）。
-TABLE_ROW_HEIGHT = 24
-TABLE_GRID = True
-TABLE_ZEBRA = True
+#: 表格最小高度：至少露出这么多整行，再加一点余量，避免最后一行被截成半行。
+TABLE_MIN_VISIBLE_ROWS = 4
+TABLE_MIN_HEIGHT_EXTRA = 40
 
 
 # --- 样式装载 ----------------------------------------------------------------
