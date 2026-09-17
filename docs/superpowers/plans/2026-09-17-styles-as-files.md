@@ -1575,7 +1575,15 @@ Run:
 python -X utf8 "$env:TEMP\opencode\parity.py" "$env:TEMP\parity-before" "$env:TEMP\parity-after"
 ```
 
-Expected: `main` 差异 ≈ 0（表格里「未跟踪」行的灰字与数字列/扩展名列的灰字出现在 `main` 与 `ready`/`unchecked` 里 → 允许差异集中在表格行文字处）。逐个确认差异都落在 Task 3 已知的 5 处视觉变化内（扩展名列、数字列、未跟踪状态列、冲突加粗、状态栏出错加粗），**不允许**出现窗口底色、表头、边框、行高、滚动条的差异——若出现，说明 Task 1/2 的 `.qss` 漏写了某条规则，回去补齐后重跑本步。
+Expected（逐张判定，不要只看总数）：
+
+| 截图 | 期望 |
+|---|---|
+| `empty`（干净仓库空状态） | **0 差异**（空状态与状态栏文字都没动过） |
+| `unchecked` | 差异只出现在扩展名列与两个数字列的灰字像素上（这几列文字本来会被丢弃灰度） |
+| `main` / `ready` | 差异只出现在扩展名列、数字列的灰字像素，以及（若 fixture 里有未跟踪行）未跟踪行的状态列灰字 |
+
+**不允许**出现窗口底色、状态栏底色、表头、表格边框、行高、滚动条、勾选框的任何差异——出现任何一条都说明 Task 1/2 的 `.qss` 漏写了对应规则（先补规则再重跑本步），不要用「大概差不多」放过。
 
 - [ ] **Step 3: 真机冒烟**
 
@@ -1599,21 +1607,52 @@ Write-Output "残留 python 进程: $((Get-Process python -ErrorAction SilentlyC
 
 Expected: `窗口正常打开`、`stderr: (空)`、`残留 python 进程: 0`
 
-- [ ] **Step 4: 用 flat 样式启动一次，确认样式可切换**
+- [ ] **Step 4: 用 flat 样式启动一次，确认样式真的能换**
 
-```powershell
-python -X utf8 -c "
-import app
-from PySide6.QtWidgets import QApplication
-from app.ui import theme
-app_obj = QApplication([])
-print('样式列表:', theme.available_styles())
-theme.apply_light_theme(app_obj, 'flat')
-print('flat 生效，样式表长度:', len(app_obj.styleSheet()))
-"
+写 `%TEMP%\opencode\style_switch.py`（**必须写文件并 `os._exit(0)` 收尾**：内联 `python -c` 在创建 QApplication 后可能挂死或崩溃）：
+
+```python
+"""非 offscreen 启动，确认两套样式都能装上去。"""
+
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(r"D:\wlr\ai\git-ai-commit")))
+
+import app  # noqa: E402,F401
+from PySide6.QtWidgets import QApplication  # noqa: E402
+
+from app.ui import theme  # noqa: E402
+
+
+def main() -> int:
+    window_app = QApplication([])
+    print("样式列表:", theme.available_styles(), flush=True)
+    for key, label in theme.available_styles():
+        theme.apply_light_theme(window_app, key)
+        length = len(window_app.styleSheet())
+        print(f"{key}({label}): 样式表长度={length}", flush=True)
+        assert length > 0, f"{key} 的样式表是空的"
+    print("两套样式都能应用", flush=True)
+    return 0
+
+
+if __name__ == "__main__":
+    import os
+
+    code = main()
+    sys.stdout.flush()
+    os._exit(code)
 ```
 
-Expected: 打印 `[('traditional', '传统框感'), ('flat', '扁平')]` 与 flat 样式表长度 > 0，无异常
+Run:
+
+```powershell
+$env:PYTHONIOENCODING='utf-8'; [Console]::OutputEncoding=[System.Text.Encoding]::UTF8
+python -X utf8 "$env:TEMP\opencode\style_switch.py"
+```
+
+Expected: 打印 `样式列表: [('traditional', '传统框感'), ('flat', '扁平')]` 与两行非零长度，最后 `两套样式都能应用`，退出码 0
 
 - [ ] **Step 5: 追加台账并提交**
 
