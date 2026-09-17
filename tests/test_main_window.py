@@ -32,6 +32,61 @@ def _make_window(tmp_path, monkeypatch):
     return mw.MainWindow(str(tmp_path))
 
 
+def _mouse(kind, local, buttons=Qt.MouseButton.LeftButton):
+    from PySide6.QtCore import QPointF
+    from PySide6.QtGui import QMouseEvent
+
+    point = QPointF(local[0], local[1])
+    return QMouseEvent(
+        kind,
+        point,
+        point,
+        Qt.MouseButton.LeftButton,
+        buttons,
+        Qt.KeyboardModifier.NoModifier,
+    )
+
+
+def _send_click(viewport, x, y, qapp, double=False):
+    """在视口坐标 (x, y) 投递一次真实点击。
+
+    double=True 模拟快速连点的第二次按下（带 DoubleClick 标记）。
+    """
+    from PySide6.QtCore import QEvent
+
+    local = (x, y)
+    QApplication.sendEvent(viewport, _mouse(QEvent.Type.MouseButtonPress, local))
+    QApplication.sendEvent(
+        viewport, _mouse(QEvent.Type.MouseButtonRelease, local, Qt.MouseButton.NoButton)
+    )
+    if double:
+        QApplication.sendEvent(viewport, _mouse(QEvent.Type.MouseButtonDblClick, local))
+        QApplication.sendEvent(
+            viewport, _mouse(QEvent.Type.MouseButtonRelease, local, Qt.MouseButton.NoButton)
+        )
+    qapp.processEvents()
+
+
+def _indicator_box(window):
+    """从渲染结果里量出勾选框的左右边界与中心行。
+
+    只认勾选框描边的灰度（``TEXT_MUTED`` 附近），避免把路径文字的笔画当成勾选框。
+    """
+    from PySide6.QtGui import QColor
+
+    table = window.changes_table
+    row = table.visualItemRect(table.item(0, 0))
+    image = table.viewport().grab().toImage()
+    border = QColor(theme.TEXT_MUTED).lightness()
+    xs = sorted(
+        x
+        for x in range(0, 30)
+        for y in range(row.top() + 1, row.bottom())
+        if abs(image.pixelColor(x, y).lightness() - border) <= 25
+    )
+    return xs[0], xs[-1], row.center().y()
+
+
 class _FakeWorker:
     def __init__(self, running=True, wait_result=True):
         self._running = running
@@ -377,3 +432,202 @@ def test_busy_disables_commit_and_keeps_start_text(qapp, tmp_path, monkeypatch):
 
     window._set_busy(False)
     assert window.btn_commit.isEnabled() is True
+
+
+def test_indicator_box_is_wide_enough_to_hit(qapp, tmp_path, monkeypatch):
+    """实测画出来的勾选框，并确认它周围有容错可点区。
+
+    用户反馈：连续点击勾选框「迟钝或有时候无法响应」。定位到两个原因：
+    1) Qt 只在鼠标松开点正好落在勾选框内时切换，画出来只有 17px，点偏就没反应；
+    2) 快速连点第二次按下带 DoubleClick 标记，会被 Qt 整个丢掉。
+    """
+    window = _make_window(tmp_path, monkeypatch)
+    window._on_changes_loaded(_changes_fixture())
+    window.show()
+    qapp.processEvents()
+
+    table = window.changes_table
+    item = table.item(0, 0)
+    table.blockSignals(True)
+    item.setCheckState(Qt.CheckState.Unchecked)
+    table.blockSignals(False)
+    qapp.processEvents()
+
+    left, right, y = _indicator_box(window)
+    assert 10 <= right - left + 1 <= 24, f"勾选框宽度异常：{left}..{right}"
+
+    # 勾选框内部左缘一点点就必须能切换
+    for x in (left + 1, (left + right) // 2, right - 1):
+        table.blockSignals(True)
+        item.setCheckState(Qt.CheckState.Unchecked)
+        table.blockSignals(False)
+        _send_click(table.viewport(), x, y, qapp)
+        assert item.checkState() == Qt.CheckState.Checked, f"x={x} 点在框内却没切换"
+
+
+def test_click_just_outside_indicator_still_toggles(qapp, tmp_path, monkeypatch):
+    """点在勾选框外侧几个像素（差一点点没点准）也必须算数。"""
+    window = _make_window(tmp_path, monkeypatch)
+    window._on_changes_loaded(_changes_fixture())
+    window.show()
+    qapp.processEvents()
+
+    table = window.changes_table
+    item = table.item(0, 0)
+    left, right, y = _indicator_box(window)
+
+    for x, label in ((left - 4, "左外侧"), (right + 4, "右外侧")):
+        table.blockSignals(True)
+        item.setCheckState(Qt.CheckState.Unchecked)
+        table.blockSignals(False)
+        _send_click(table.viewport(), x, y, qapp)
+        assert item.checkState() == Qt.CheckState.Checked, f"{label} x={x} 没切换"
+
+
+def test_double_click_press_alone_toggles(qapp, tmp_path, monkeypatch):
+    """快速连点的那一下（带 DoubleClick 标记的按下）必须生效。
+
+    Qt 的 QAbstractItemView 只在普通按下时切换勾选，带 DoubleClick 标记的按下
+    会被整个丢掉（releaseFromDoubleClick），于是快速连点第二次像「没反应」。
+    """
+    window = _make_window(tmp_path, monkeypatch)
+    window._on_changes_loaded(_changes_fixture())
+    window.show()
+    qapp.processEvents()
+
+    table = window.changes_table
+    item = table.item(0, 0)
+    left, right, y = _indicator_box(window)
+    x = (left + right) // 2
+
+    changes = []
+    table.itemChanged.connect(lambda changed: changes.append(changed.checkState()))
+    table.blockSignals(True)
+    item.setCheckState(Qt.CheckState.Unchecked)
+    table.blockSignals(False)
+    changes.clear()
+
+    from PySide6.QtCore import QEvent
+
+    QApplication.sendEvent(table.viewport(), _mouse(QEvent.Type.MouseButtonDblClick, (x, y)))
+    QApplication.sendEvent(
+        table.viewport(), _mouse(QEvent.Type.MouseButtonRelease, (x, y), Qt.MouseButton.NoButton)
+    )
+    qapp.processEvents()
+
+    assert item.checkState() == Qt.CheckState.Checked, "带 DoubleClick 标记的点击被丢掉了"
+    assert len(changes) == 1, f"应当切换一次，实际 {len(changes)} 次"
+
+
+def test_fast_double_click_counts_as_two_clicks(qapp, tmp_path, monkeypatch):
+    """快速连点两次 = 两次切换，不能因为双击标记丢掉一次。
+
+    连点序列是「普通按下 + 带 DoubleClick 标记的按下」，两次按下各算一次点击，
+    所以从「未勾选」出发应当勾上再取消，正好回到未勾选。
+    """
+    window = _make_window(tmp_path, monkeypatch)
+    window._on_changes_loaded(_changes_fixture())
+    window.show()
+    qapp.processEvents()
+
+    table = window.changes_table
+    item = table.item(0, 0)
+    left, right, y = _indicator_box(window)
+    x = (left + right) // 2
+
+    changes = []
+    table.itemChanged.connect(lambda changed: changes.append(changed.checkState()))
+
+    table.blockSignals(True)
+    item.setCheckState(Qt.CheckState.Unchecked)
+    table.blockSignals(False)
+    changes.clear()
+
+    _send_click(table.viewport(), x, y, qapp, double=True)
+    qapp.processEvents()
+
+    assert len(changes) == 2, f"两次点击应当切换两次，实际 {len(changes)} 次"
+    assert changes == [Qt.CheckState.Checked, Qt.CheckState.Unchecked]
+    assert item.checkState() == Qt.CheckState.Unchecked
+
+
+
+def test_click_on_path_text_does_not_toggle(qapp, tmp_path, monkeypatch):
+    """点路径文字只能选中行，不能顺手改勾选（避免误提交/漏提交）。"""
+    window = _make_window(tmp_path, monkeypatch)
+    window._on_changes_loaded(_changes_fixture())
+    window.show()
+    qapp.processEvents()
+
+    table = window.changes_table
+    item = table.item(0, 0)
+    left, right, y = _indicator_box(window)
+
+    for x in (right + 12, 120, 300):
+        table.blockSignals(True)
+        item.setCheckState(Qt.CheckState.Checked)
+        table.blockSignals(False)
+        _send_click(table.viewport(), x, y, qapp)
+        assert item.checkState() == Qt.CheckState.Checked, f"x={x} 点在文字上却改了勾选"
+
+
+def test_press_toggles_immediately_and_release_does_not_repeat(qapp, tmp_path, monkeypatch):
+    """一次按下 = 一次切换：按下立刻有反馈，随后的松开不能重复切换。
+
+    这样连点、双击标记、拖拽都不影响结果，一次点击永远只切换一次。
+    """
+    from PySide6.QtCore import QEvent
+
+    window = _make_window(tmp_path, monkeypatch)
+    window._on_changes_loaded(_changes_fixture())
+    window.show()
+    qapp.processEvents()
+
+    table = window.changes_table
+    item = table.item(0, 0)
+    left, right, y = _indicator_box(window)
+    x = (left + right) // 2
+
+    changes = []
+    table.itemChanged.connect(lambda changed: changes.append(changed.checkState()))
+    table.blockSignals(True)
+    item.setCheckState(Qt.CheckState.Unchecked)
+    table.blockSignals(False)
+    changes.clear()
+
+    QApplication.sendEvent(table.viewport(), _mouse(QEvent.Type.MouseButtonPress, (x, y)))
+    qapp.processEvents()
+    assert item.checkState() == Qt.CheckState.Checked, "按下没有立刻切换"
+    assert len(changes) == 1
+
+    QApplication.sendEvent(
+        table.viewport(), _mouse(QEvent.Type.MouseButtonRelease, (x, y), Qt.MouseButton.NoButton)
+    )
+    qapp.processEvents()
+    assert item.checkState() == Qt.CheckState.Checked, "松开又把勾选切回去了"
+    assert len(changes) == 1, f"一次点击切换了 {len(changes)} 次"
+
+
+def test_checkbox_press_selects_row_and_focuses_table(qapp, tmp_path, monkeypatch):
+    """点勾选框要像点路径文字一样选中该行并拿到焦点，否则点完勾选框 A/N 快捷键失效。"""
+    from PySide6.QtCore import QEvent
+
+    window = _make_window(tmp_path, monkeypatch)
+    window._on_changes_loaded(_changes_fixture())
+    window.show()
+    qapp.processEvents()
+
+    table = window.changes_table
+    table.clearSelection()
+    window.message_edit.setFocus()
+    qapp.processEvents()
+
+    left, right, y = _indicator_box(window)
+    QApplication.sendEvent(
+        table.viewport(), _mouse(QEvent.Type.MouseButtonPress, ((left + right) // 2, y))
+    )
+    qapp.processEvents()
+
+    assert table.selectionModel().selectedRows(), "点勾选框后没有选中该行"
+    assert table.hasFocus(), "点勾选框后表格没有获得焦点"
+    assert table.currentRow() == 0

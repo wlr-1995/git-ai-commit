@@ -5,7 +5,7 @@ import re
 import unicodedata
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, Qt
+from PySide6.QtCore import QEvent, QItemSelectionModel, QPoint, QRect, Qt
 from PySide6.QtGui import QColor, QFontMetrics, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -18,6 +18,8 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QSizePolicy,
+    QStyle,
+    QStyleOptionViewItem,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -133,6 +135,103 @@ class _SignalsBlocked:
     def __exit__(self, *exc) -> bool:
         self._widget.blockSignals(self._previous)
         return False
+
+
+class ChangesTable(QTableWidget):
+    """变更列表表格：让勾选框「点得准、连点不丢」。
+
+    Qt 的默认行为有两个坑：
+    1. 只在**松开**那一刻、且松开点正好落在画出来的勾选框内时才切换勾选，
+       而勾选框只有十几像素宽，点偏一点点就完全没反应；
+    2. 快速连点的第二次按下会带 ``DoubleClick`` 标记，被 Qt 整个丢掉
+       （``releaseFromDoubleClick``），于是连点像是「有时候不响应」。
+
+    这里把交互契约改成与平台无关：**一次按下 = 一次切换**。
+    - 命中区以勾选框为中心外扩到至少 :data:`HIT_SIZE` 见方（仍限制在单元格内），
+      容忍鼠标/手指的小偏移；
+    - 按下即切换，立刻有视觉反馈，不用等松开；
+    - 记住「该松开已经被消化」，避免同一次点击切换两次。
+    """
+
+    #: 勾选框命中区的最小边长（画出来的方框约 17px）。
+    HIT_SIZE = 26
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._swallow_release = False
+
+    def indicator_hit_rect(self, pos: QPoint) -> QRect | None:
+        """返回 (pos) 所在行的勾选框可点区域；不在勾选列上则返回 None。"""
+        index = self.indexAt(pos)
+        if not index.isValid() or index.column() != 0:
+            return None
+        item = self.item(index.row(), index.column())
+        if item is None or not item.flags() & Qt.ItemFlag.ItemIsUserCheckable:
+            return None
+
+        cell = self.visualRect(index)
+        option = QStyleOptionViewItem()
+        option.rect = cell
+        option.state |= QStyle.StateFlag.State_Enabled
+        option.features |= QStyleOptionViewItem.ViewItemFeature.HasCheckIndicator
+        option.checkState = item.checkState()
+        indicator = self.style().subElementRect(
+            QStyle.SubElement.SE_ItemViewItemCheckIndicator, option, self
+        )
+        hit = QRect(0, 0, self.HIT_SIZE, self.HIT_SIZE)
+        hit.moveCenter(indicator.center())
+        return hit.intersected(cell)
+
+    def hits_indicator(self, pos: QPoint) -> bool:
+        """(pos) 是否落在勾选框（含外扩容错）上。"""
+        rect = self.indicator_hit_rect(pos)
+        return rect is not None and rect.contains(pos)
+
+    def _toggle_row(self, index) -> None:
+        """切换该行勾选，并做点击勾选框时应有的选中/焦点反馈。
+
+        选中状态不参与提交决策（提交内容由勾选框决定），所以这里按「点哪儿算哪儿」
+        选中该行：既给用户位置反馈，也让随后的 A/N 快捷键可用（表格需要有焦点）。
+        """
+        item = self.item(index.row(), 0)
+        item.setCheckState(
+            Qt.CheckState.Unchecked
+            if item.checkState() == Qt.CheckState.Checked
+            else Qt.CheckState.Checked
+        )
+        self.setCurrentIndex(index)
+        self.selectionModel().select(
+            index,
+            QItemSelectionModel.SelectionFlag.ClearAndSelect
+            | QItemSelectionModel.SelectionFlag.Rows,
+        )
+        self.setFocus(Qt.FocusReason.MouseFocusReason)
+        self._swallow_release = True
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802 - Qt 命名
+        pos = event.position().toPoint()
+        if event.button() == Qt.MouseButton.LeftButton and self.hits_indicator(pos):
+            self._toggle_row(self.indexAt(pos))
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseDoubleClickEvent(self, event) -> None:  # noqa: N802 - Qt 命名
+        pos = event.position().toPoint()
+        if event.button() == Qt.MouseButton.LeftButton and self.hits_indicator(pos):
+            # 快速连点的第二次按下：仍算一次点击，不能被 Qt 丢掉。
+            self._toggle_row(self.indexAt(pos))
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802 - Qt 命名
+        if self._swallow_release and event.button() == Qt.MouseButton.LeftButton:
+            # 勾选已经在按下时切换过，这次松开不能再切一次。
+            self._swallow_release = False
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
 
 
 #: 变更表格的列（首列内含勾选框与路径，与 TortoiseGit 的「检查修改」一致）。
@@ -297,7 +396,7 @@ class MainWindow(QMainWindow):
         return row
 
     def _build_table(self) -> QTableWidget:
-        table = QTableWidget(0, len(_TABLE_COLUMNS))
+        table = ChangesTable(0, len(_TABLE_COLUMNS))
         table.setHorizontalHeaderLabels(list(_TABLE_COLUMNS))
         table.verticalHeader().setVisible(False)
         table.verticalHeader().setDefaultSectionSize(theme.TABLE_ROW_HEIGHT)
