@@ -81,7 +81,9 @@ export async function generateCommitMessage(
       signal: AbortSignal.any(signals),
     })
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
+    // Node 的 fetch 只抛 "fetch failed"，真正的原因（ECONNREFUSED 等）在 cause 里
+    const cause = (error as { cause?: { message?: string } }).cause?.message
+    const message = cause ?? (error instanceof Error ? error.message : String(error))
     throw new AIError(`AI 请求失败：${message}`)
   }
 

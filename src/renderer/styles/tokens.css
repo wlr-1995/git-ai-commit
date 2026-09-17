@@ -1,0 +1,46 @@
+:root {
+  --bg: #ffffff;
+  --surface-muted: #f8fafc;
+  --border: #e4e7ec;
+  --border-strong: #d0d5dd;
+  --text: #0f172a;
+  --text-muted: #64748b;
+  --accent: #2563eb;
+  --accent-ink: #ffffff;
+  --add-bg: #dcfce7;
+  --add-fg: #14532d;
+  --del-bg: #fee2e2;
+  --del-fg: #7f1d1d;
+  --status-modified: #b45309;
+  --status-added: #15803d;
+  --status-deleted: #b91c1c;
+  --status-renamed: #6d28d9;
+  --status-untracked: var(--text-muted);
+  --status-conflicted: #b91c1c;
+  --row-height: 30px;
+  --radius: 6px;
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 12px;
+  --space-lg: 16px;
+  --space-xl: 24px;
+  --font-ui: "Microsoft YaHei UI", "Segoe UI", system-ui, sans-serif;
+  --font-mono: Consolas, "Cascadia Mono", monospace;
+  --font-size: 13px;
+  --font-size-small: 12px;
+
+  --chip-bg: var(--surface-muted);
+  --chip-border: var(--border);
+  --header-bg: var(--surface-muted);
+  --row-selected-bg: #eff6ff;
+  --row-hover-bg: #f8fafc;
+  --diff-hunk-bg: #f1f5f9;
+  --note-bg: #fffbeb;
+  --note-fg: #92400e;
+  --shadow-popover: 0 8px 24px rgba(16, 24, 40, 0.12);
+  --splitter-width: 5px;
+  --left-column-min: 420px;
+  --left-column-width: 560px;
+  /* 窄窗阈值同时写死在 app.css 的 @media 与 main.ts 的 matchMedia（媒体查询不吃 var） */
+  --narrow-breakpoint: 760px;
+}

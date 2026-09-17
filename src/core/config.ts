@@ -18,7 +18,7 @@ export const DEFAULT_CONFIG: AppConfig = {
     timeout: 60,
   },
   git: { max_diff_lines: 200 },
-  ui: { window_width: 720, window_height: 520, show_untracked: false, style: DEFAULT_STYLE },
+  ui: { window_width: 1100, window_height: 640, show_untracked: false, style: DEFAULT_STYLE },
   selection: { checked_by_default: "tracked" },
 }
 

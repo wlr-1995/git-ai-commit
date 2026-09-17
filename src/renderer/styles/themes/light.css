@@ -1,0 +1,11 @@
+/* 名称: 克制工具（浅色） */
+:root {
+  --bg: #ffffff;
+  --surface-muted: #f8fafc;
+  --border: #e4e7ec;
+  --border-strong: #d0d5dd;
+  --text: #0f172a;
+  --text-muted: #64748b;
+  --accent: #2563eb;
+  --accent-ink: #ffffff;
+}

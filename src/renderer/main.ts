@@ -119,6 +119,7 @@ async function refresh(): Promise<void> {
   const result = await api.repoLoad()
   state.busy = null
   if (result.ok) {
+    repoPath = result.value.repoRoot
     state.branch = result.value.branch
     state.changes = result.value.changes
     state.stats = result.value.stats
@@ -240,8 +241,8 @@ function bindSplitter(): void {
   const move = (event: PointerEvent): void => {
     if (!dragging) return
     const left = Math.round(event.clientX - body.getBoundingClientRect().left)
-    const max = Math.round(window.innerWidth / 2)
-    const width = Math.max(320, Math.min(max, left))
+    const max = Math.round(window.innerWidth * 0.6)
+    const width = Math.max(420, Math.min(max, left))
     document.documentElement.style.setProperty("--left-column-width", `${width}px`)
   }
 
@@ -256,7 +257,7 @@ function bindSplitter(): void {
 }
 
 function bindNarrowMode(): void {
-  const query = window.matchMedia("(max-width: 820px)")
+  const query = window.matchMedia("(max-width: 760px)")
   const app = el("app")
   const sync = (): void => {
     app.classList.toggle("narrow", query.matches)

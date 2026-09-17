@@ -63,6 +63,7 @@ export function registerIpc(win: BrowserWindow, repoRoot: string): void {
 
   handle(CHANNELS.repoLoad, () =>
     guarded(async () => ({
+      repoRoot,
       branch: await currentBranch(repoRoot),
       changes: await listChanges(repoRoot),
       stats: await diffNumstat(repoRoot),

@@ -119,6 +119,17 @@ describe("generateCommitMessage", () => {
     await expect(generateCommitMessage("d", CFG, { fetchImpl })).rejects.toThrow(/^AI 请求失败：/)
   })
 
+  it("优先展示 fetch 的 cause（否则用户只看到 fetch failed）", async () => {
+    const fetchImpl = async () => {
+      throw Object.assign(new Error("fetch failed"), {
+        cause: new Error("connect ECONNREFUSED 127.0.0.1:9"),
+      })
+    }
+    await expect(generateCommitMessage("d", CFG, { fetchImpl })).rejects.toThrow(
+      "AI 请求失败：connect ECONNREFUSED 127.0.0.1:9",
+    )
+  })
+
   it("内容为空抛 AIError", async () => {
     const { fetchImpl } = fakeFetch({ choices: [{ message: { content: "   " } }] })
     await expect(generateCommitMessage("d", CFG, { fetchImpl })).rejects.toThrow("AI 未返回有效内容")

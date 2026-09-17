@@ -3,6 +3,7 @@ import type { FileChange } from "../shared/changes"
 export type StatTuple = [number | null, number | null]
 
 export interface RepoSnapshot {
+  repoRoot: string
   branch: string
   changes: FileChange[]
   stats: Record<string, StatTuple>

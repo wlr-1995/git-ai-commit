@@ -30,13 +30,16 @@
           <div class="list-header">
             <span class="section-label">变更列表</span>
             <span class="hint">选中</span>
+            <span class="spacer"></span>
+            <span class="hint">F5 刷新</span>
+          </div>
+
+          <div class="filter-row">
             <button class="chip" data-filter="all" title="勾选列表中的全部文件">全部(A)</button>
             <button class="chip" data-filter="none" title="取消全部勾选">无(N)</button>
             <button class="chip" data-filter="added" title="勾选所有「已添加」的文件，不取消其它勾选">已添加</button>
             <button class="chip" data-filter="deleted" title="勾选所有「已删除」的文件，不取消其它勾选">已删除</button>
             <button class="chip" data-filter="modified" title="勾选所有「已修改 / 已重命名」的文件，不取消其它勾选">已修改</button>
-            <span class="spacer"></span>
-            <span class="hint">F5 刷新</span>
           </div>
 
           <div class="table-wrap" id="table-wrap" tabindex="0">

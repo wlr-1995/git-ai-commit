@@ -83,7 +83,7 @@ describe("saveConfig", () => {
     expect(raw).toContain('\n  "api"')
   })
 
-  it("默认配置与 Python 版逐键一致", () => {
+  it("默认配置与规格一致", () => {
     expect(DEFAULT_CONFIG.api).toEqual({
       url: "http://localhost:11434/v1",
       api_key: "ollama",
@@ -94,8 +94,9 @@ describe("saveConfig", () => {
       timeout: 60,
     })
     expect(DEFAULT_CONFIG.git.max_diff_lines).toBe(200)
-    expect(DEFAULT_CONFIG.ui.window_width).toBe(720)
-    expect(DEFAULT_CONFIG.ui.window_height).toBe(520)
+    // 窗口尺寸是 Electron 版独有的界面键：左右分栏需要更宽的开窗（Python 版是 720x520）
+    expect(DEFAULT_CONFIG.ui.window_width).toBe(1100)
+    expect(DEFAULT_CONFIG.ui.window_height).toBe(640)
     expect(DEFAULT_CONFIG.ui.show_untracked).toBe(false)
     expect(DEFAULT_CONFIG.ui.style).toBe("light")
     expect(DEFAULT_CONFIG.selection.checked_by_default).toBe("tracked")
