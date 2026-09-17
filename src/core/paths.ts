@@ -17,8 +17,12 @@ export function resolveInsideRepo(repoRoot: string, relPath: string): string {
   if (typeof relPath !== "string" || relPath.length === 0 || relPath.includes("\0")) {
     throw new PathError(`非法路径: ${String(relPath)}`)
   }
+  // git 给出的路径永远是仓库内相对路径；只接受相对路径，避免 join 出怪异结果
+  if (isAbsolute(relPath)) {
+    throw new PathError(`必须是仓库内相对路径: ${relPath}`)
+  }
   const root = resolve(repoRoot)
-  const target = isAbsolute(relPath) ? resolve(relPath) : resolve(root, relPath)
+  const target = resolve(root, relPath)
   const rel = relative(root, target)
   if (rel !== "" && (rel.startsWith("..") || isAbsolute(rel))) {
     throw new PathError(`路径超出仓库范围: ${relPath}`)

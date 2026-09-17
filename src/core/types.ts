@@ -22,6 +22,9 @@ export type ErrorCode =
   | "CONFIG_WRITE"
   | "UNKNOWN"
 
+/** IPC 一律返回判别联合，不抛异常（Electron 对 Error 的序列化会丢字段）。 */
+export type Result<T> = { ok: true; value: T } | { ok: false; error: { code: ErrorCode; message: string } }
+
 export interface AppConfig {
   api: {
     url: string

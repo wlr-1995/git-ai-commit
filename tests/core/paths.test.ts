@@ -28,6 +28,10 @@ describe("resolveInsideRepo", () => {
     expect(() => resolveInsideRepo(root, join(makeTempDir(), "x.txt"))).toThrow(PathError)
   })
 
+  it("拒绝仓库内的绝对路径（只接受相对路径）", () => {
+    expect(() => resolveInsideRepo(root, join(root, "a.txt"))).toThrow(PathError)
+  })
+
   it("拒绝含 NUL 的路径", () => {
     expect(() => resolveInsideRepo(root, "a\0b")).toThrow(PathError)
   })
