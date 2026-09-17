@@ -2,11 +2,85 @@
 <html lang="zh-CN">
   <head>
     <meta charset="utf-8" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:"
+    />
+    <link rel="stylesheet" href="./styles/tokens.css" />
+    <link rel="stylesheet" href="./styles/app.css" />
+    <link rel="stylesheet" id="theme" href="./styles/themes/light.css" />
     <title>AI 提交</title>
   </head>
   <body>
-    <div id="app"></div>
+    <div id="app">
+      <header class="app-header">
+        <div class="titles">
+          <strong id="repo-name"></strong>
+          <span id="repo-path"></span>
+        </div>
+        <span class="hint">分支</span>
+        <span id="branch" class="branch-chip"></span>
+      </header>
+
+      <main class="app-body">
+        <section class="left-column">
+          <label class="section-label" for="message">提交信息</label>
+          <textarea id="message" placeholder="填写提交信息，或用「AI 生成」按改动生成"></textarea>
+
+          <div class="list-header">
+            <span class="section-label">变更列表</span>
+            <span class="hint">选中</span>
+            <button class="chip" data-filter="all" title="勾选列表中的全部文件">全部(A)</button>
+            <button class="chip" data-filter="none" title="取消全部勾选">无(N)</button>
+            <button class="chip" data-filter="added" title="勾选所有「已添加」的文件，不取消其它勾选">已添加</button>
+            <button class="chip" data-filter="deleted" title="勾选所有「已删除」的文件，不取消其它勾选">已删除</button>
+            <button class="chip" data-filter="modified" title="勾选所有「已修改 / 已重命名」的文件，不取消其它勾选">已修改</button>
+            <span class="spacer"></span>
+            <span class="hint">F5 刷新</span>
+          </div>
+
+          <div class="table-wrap" id="table-wrap" tabindex="0">
+            <table id="changes">
+              <thead>
+                <tr>
+                  <th>路径</th>
+                  <th>扩展名</th>
+                  <th>状态</th>
+                  <th class="num">添加行数</th>
+                  <th class="num">删除行数</th>
+                </tr>
+              </thead>
+              <tbody id="changes-body"></tbody>
+            </table>
+            <p id="empty-state" class="empty-state" hidden></p>
+          </div>
+
+          <label class="untracked-toggle">
+            <input type="checkbox" id="show-untracked" />
+            显示未受版本控制的文件(U)
+          </label>
+        </section>
+
+        <div id="splitter" class="splitter" role="separator" aria-orientation="vertical"></div>
+
+        <section class="diff-panel" id="diff-panel">
+          <div class="diff-title" id="diff-title" hidden></div>
+          <div class="diff-body" id="diff-body" hidden></div>
+          <p class="diff-empty" id="diff-empty">选择左侧文件查看改动</p>
+        </section>
+      </main>
+
+      <div class="actions">
+        <button id="btn-settings">设置</button>
+        <button id="btn-generate">AI 生成</button>
+        <button id="btn-cancel" disabled>取消</button>
+        <span id="action-hint" class="hint"></span>
+        <span class="spacer"></span>
+        <button id="btn-commit" class="primary">提交</button>
+      </div>
+
+      <footer id="status" class="status-bar">就绪</footer>
+    </div>
     <script type="module" src="./main.ts"></script>
   </body>
 </html>

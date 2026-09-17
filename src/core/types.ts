@@ -1,4 +1,4 @@
-import type { FileChange } from "./repo"
+import type { FileChange } from "../shared/changes"
 
 export type StatTuple = [number | null, number | null]
 

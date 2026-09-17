@@ -2,44 +2,26 @@ import { open } from "node:fs/promises"
 import { join } from "node:path"
 
 import { GitError, runGit } from "./gitcmd"
+import {
+  ADDED,
+  CONFLICTED,
+  DELETED,
+  MODIFIED,
+  RENAMED,
+  STATUS_LETTER,
+  STATUS_TEXT,
+  UNTRACKED,
+  type FileChange,
+} from "../shared/changes"
 
-export const MODIFIED = "modified"
-export const ADDED = "added"
-export const DELETED = "deleted"
-export const RENAMED = "renamed"
-export const UNTRACKED = "untracked"
-export const CONFLICTED = "conflicted"
+export { ADDED, CONFLICTED, DELETED, MODIFIED, RENAMED, STATUS_LETTER, STATUS_TEXT, UNTRACKED }
+export type { FileChange }
 
 /** 无法判断当前分支时的显示文本。 */
 export const UNKNOWN_BRANCH = "未知"
 
 /** 未跟踪文件参与 diff 分析时的大小上限；超过则只给标记，不读取内容。 */
 export const MAX_UNTRACKED_BYTES = 512 * 1024
-
-export interface FileChange {
-  path: string
-  status: string
-  origPath: string | null
-}
-
-export const STATUS_LETTER: Record<string, string> = {
-  [MODIFIED]: "M",
-  [ADDED]: "A",
-  [DELETED]: "D",
-  [RENAMED]: "R",
-  [UNTRACKED]: "?",
-  [CONFLICTED]: "!",
-}
-
-/** 状态的中文显示名（界面表格「状态」列）。 */
-export const STATUS_TEXT: Record<string, string> = {
-  [MODIFIED]: "已修改",
-  [ADDED]: "已添加",
-  [DELETED]: "已删除",
-  [RENAMED]: "已重命名",
-  [UNTRACKED]: "未版本控制",
-  [CONFLICTED]: "冲突",
-}
 
 export function statusOf(xy: string): string {
   if (xy === "??") return UNTRACKED

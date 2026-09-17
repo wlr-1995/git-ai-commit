@@ -22,7 +22,9 @@ export const DEFAULT_CONFIG: AppConfig = {
   selection: { checked_by_default: "tracked" },
 }
 
-export const CONFIG_FILE = join(homedir(), ".git_ai_commit", "config.json")
+// 正式运行固定用用户目录；GIT_AI_COMMIT_CONFIG 仅供端到端测试隔离使用。
+export const CONFIG_FILE =
+  process.env.GIT_AI_COMMIT_CONFIG ?? join(homedir(), ".git_ai_commit", "config.json")
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)

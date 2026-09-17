@@ -51,17 +51,25 @@ app.whenReady().then(async () => {
     const start = resolveStartPath(process.argv)
     const repoRoot = await findRepoRoot(start)
     if (!repoRoot) {
-      dialog.showErrorBox("AI 提交", `该目录不是 Git 仓库：\n${start}`)
-      app.exit(1)
+      fatal(`该目录不是 Git 仓库：\n${start}`)
       return
     }
     createWindow(repoRoot)
   } catch (error) {
     // 从资源管理器拉起时没有控制台，启动异常必须弹窗，否则右键菜单看起来「毫无反应」
     const err = error as Error
-    dialog.showErrorBox("AI 提交 启动失败", `${err.name}: ${err.message}`)
-    app.exit(1)
+    fatal(`${err.name}: ${err.message}`)
   }
 })
+
+/** GIT_AI_COMMIT_NO_DIALOG=1 时只写 stderr（端到端测试用），否则弹原生错误框。 */
+function fatal(message: string): void {
+  if (process.env.GIT_AI_COMMIT_NO_DIALOG === "1") {
+    console.error(message)
+  } else {
+    dialog.showErrorBox("AI 提交", message)
+  }
+  app.exit(1)
+}
 
 app.on("window-all-closed", () => app.quit())
