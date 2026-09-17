@@ -77,3 +77,36 @@ def has_commits(repo_root) -> bool:
     """仓库是否已有 HEAD 提交。"""
     code, _, _ = run_git(["rev-parse", "--verify", "HEAD"], cwd=repo_root, check=False)
     return code == 0
+
+
+def truncate(text: str, max_lines: int) -> str:
+    """超过 max_lines 时保留前 max_lines 行并标注省略数。"""
+    if max_lines <= 0:
+        return text
+    lines = text.splitlines()
+    if len(lines) <= max_lines:
+        return text
+    omitted = len(lines) - max_lines
+    return "\n".join(lines[:max_lines]) + f"\n... (已截断，省略 {omitted} 行)"
+
+
+def _diff_one(repo_root, path: str) -> str:
+    code, out, _ = run_git(["diff", "HEAD", "--", path], cwd=repo_root, check=False)
+    if code == 0 and out.strip():
+        return out
+
+    full = Path(repo_root) / path
+    if not full.is_file():
+        return ""
+    try:
+        content = full.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return f"### 新增或不可读文件: {path}"
+    body = "\n".join("+" + line for line in content.splitlines())
+    return f"### 新增文件: {path}\n{body}"
+
+
+def diff_for(repo_root, paths: list[str], max_lines: int = 200) -> str:
+    """采集指定路径的 diff 文本并截断。"""
+    sections = [section for section in (_diff_one(repo_root, p) for p in paths) if section]
+    return truncate("\n".join(sections), max_lines)
