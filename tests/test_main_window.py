@@ -10,7 +10,7 @@ pytest.importorskip("PySide6")
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtGui import QCloseEvent  # noqa: E402
+from PySide6.QtGui import QCloseEvent, QKeySequence, QShortcut  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from app.core import repo  # noqa: E402
@@ -91,7 +91,89 @@ def test_layout_puts_message_above_file_list(qapp, tmp_path, monkeypatch):
     window = _make_window(tmp_path, monkeypatch)
     layout = window.centralWidget().layout()
 
-    assert layout.indexOf(window.message_edit) < layout.indexOf(window.list_widget)
+    assert layout.indexOf(window.message_edit) < layout.indexOf(window.changes_table)
+
+
+def test_table_has_expected_columns(qapp, tmp_path, monkeypatch):
+    window = _make_window(tmp_path, monkeypatch)
+    table = window.changes_table
+    headers = [table.horizontalHeaderItem(i).text() for i in range(table.columnCount())]
+
+    assert headers == ["路径", "扩展名", "状态", "添加行数", "删除行数"]
+
+
+def test_changes_loaded_fills_table(qapp, tmp_path, monkeypatch):
+    window = _make_window(tmp_path, monkeypatch)
+    changes = [
+        repo.FileChange(path="a.md", status=repo.MODIFIED),
+        repo.FileChange(path="new.txt", status=repo.UNTRACKED),
+    ]
+    stats = {"a.md": (1, 1)}
+
+    window._on_changes_loaded(changes, stats)
+
+    table = window.changes_table
+    assert table.rowCount() == 2
+    assert [table.item(0, c).text() for c in range(5)] == ["a.md", ".md", "已修改", "1", "1"]
+    # 未跟踪文件不统计行数，留空
+    assert [table.item(1, c).text() for c in range(5)] == ["new.txt", ".txt", "未版本控制", "", ""]
+    # 二进制行数显示 -
+    window._on_changes_loaded([repo.FileChange(path="b.bin", status=repo.MODIFIED)], {"b.bin": (None, None)})
+    assert table.item(0, 3).text() == "-"
+    assert table.item(0, 4).text() == "-"
+
+
+def test_default_checks_tracked_not_untracked(qapp, tmp_path, monkeypatch):
+    window = _make_window(tmp_path, monkeypatch)
+    window._on_changes_loaded(
+        [
+            repo.FileChange(path="a.txt", status=repo.MODIFIED),
+            repo.FileChange(path="b.txt", status=repo.UNTRACKED),
+        ]
+    )
+
+    assert window.checked_paths() == ["a.txt"]
+
+
+def test_filter_links_check_matching_statuses(qapp, tmp_path, monkeypatch):
+    window = _make_window(tmp_path, monkeypatch)
+    window._on_changes_loaded(
+        [
+            repo.FileChange(path="a.txt", status=repo.MODIFIED),
+            repo.FileChange(path="new.txt", status=repo.UNTRACKED),
+            repo.FileChange(path="gone.txt", status=repo.DELETED),
+            repo.FileChange(path="moved.txt", status=repo.RENAMED, orig_path="old.txt"),
+        ]
+        + [],
+        {},
+    )
+
+    window._apply_filter("untracked")
+    assert window.checked_paths() == ["new.txt"]
+
+    window._apply_filter("modified")
+    assert set(window.checked_paths()) == {"a.txt", "moved.txt"}
+
+    window._apply_filter("none")
+    assert window.checked_paths() == []
+
+    window._apply_filter("all")
+    assert len(window.checked_paths()) == 4
+
+
+def test_f5_shortcut_triggers_refresh(qapp, tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(mw.MainWindow, "refresh", lambda self: calls.append(1))
+    monkeypatch.setattr(mw, "load_config", lambda: copy.deepcopy(DEFAULT_CONFIG))
+    window = mw.MainWindow(str(tmp_path))
+
+    shortcits = [
+        s for s in window.findChildren(QShortcut) if s.key() == QKeySequence("F5")
+    ]
+    assert shortcits, "F5 快照键未注册"
+    shortcits[0].activated.emit()
+
+    assert calls
 
 
 def test_snapshot_loaded_shows_branch(qapp, tmp_path, monkeypatch):

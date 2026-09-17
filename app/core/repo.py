@@ -27,6 +27,16 @@ STATUS_LETTER = {
     CONFLICTED: "!",
 }
 
+#: 状态的中文显示名（界面表格「状态」列）。
+STATUS_TEXT = {
+    MODIFIED: "已修改",
+    ADDED: "已添加",
+    DELETED: "已删除",
+    RENAMED: "已重命名",
+    UNTRACKED: "未版本控制",
+    CONFLICTED: "冲突",
+}
+
 
 @dataclass(frozen=True)
 class FileChange:
@@ -72,25 +82,38 @@ def _status_of(xy: str) -> str:
     return MODIFIED
 
 
-def parse_porcelain(text: str) -> list[FileChange]:
-    """解析 `git status --porcelain` 输出。"""
+def parse_porcelain_z(text: str) -> list[FileChange]:
+    """解析 ``git status --porcelain -z`` 输出。
+
+    使用 ``-z``（NUL 分隔）而非默认格式：默认格式会给含空格的路径加引号
+    （``"a b.txt"``），即使设置了 ``core.quotepath=false`` 也一样，会让路径
+    与后续的 ``git add``/``git commit`` 不匹配。``-z`` 输出原始路径。
+
+    重命名条目为两段：先新路径，后旧路径。
+    """
+    fields = text.split("\0")
     changes: list[FileChange] = []
-    for line in text.splitlines():
-        if not line or line.startswith("!!"):
+    index = 0
+    while index < len(fields):
+        entry = fields[index]
+        index += 1
+        if not entry or entry.startswith("!!"):
             continue
-        xy = line[:2]
-        raw = line[3:]
+        xy = entry[:2]
+        path = entry[3:]
         orig: str | None = None
-        if "R" in xy and " -> " in raw:
-            orig, raw = raw.split(" -> ", 1)
-        changes.append(FileChange(path=raw, status=_status_of(xy), orig_path=orig))
+        if "R" in xy or "C" in xy:
+            if index < len(fields) and fields[index]:
+                orig = fields[index]
+            index += 1
+        changes.append(FileChange(path=path, status=_status_of(xy), orig_path=orig))
     return changes
 
 
 def list_changes(repo_root) -> list[FileChange]:
     """列出未提交的变更。"""
-    _, out, _ = run_git(["status", "--porcelain"], cwd=repo_root)
-    return parse_porcelain(out)
+    _, out, _ = run_git(["status", "--porcelain", "-z"], cwd=repo_root)
+    return parse_porcelain_z(out)
 
 
 def has_commits(repo_root) -> bool:
@@ -138,6 +161,44 @@ def diff_for(repo_root, paths: list[str], max_lines: int = 200) -> str:
     """采集指定路径的 diff 文本并截断。"""
     sections = [section for section in (_diff_one(repo_root, p) for p in paths) if section]
     return truncate("\n".join(sections), max_lines)
+
+
+def _numstat_new_path(raw: str) -> str:
+    """把 numstat 的路径字段归一为新路径（重命名形如 ``old => new``）。"""
+    if " => " not in raw:
+        return raw
+    if "{" in raw and "}" in raw:
+        prefix, rest = raw.split("{", 1)
+        middle, suffix = rest.split("}", 1)
+        _, new = middle.split(" => ", 1)
+        return f"{prefix}{new}{suffix}"
+    _, new = raw.split(" => ", 1)
+    return new
+
+
+def diff_numstat(repo_root) -> dict[str, tuple[int | None, int | None]]:
+    """返回 {路径: (添加行数, 删除行数)}，键为重命名后的新路径。
+
+    - 只覆盖已跟踪的变更；未跟踪文件不在结果里（调用方留空即可）。
+    - 二进制文件返回 ``(None, None)``，界面显示为 ``-``。
+    - 空仓库（无 HEAD）返回空字典。
+    """
+    code, out, _ = run_git(["diff", "--numstat", "HEAD"], cwd=repo_root, check=False)
+    if code != 0:
+        return {}
+
+    stats: dict[str, tuple[int | None, int | None]] = {}
+    for line in out.splitlines():
+        if not line.strip():
+            continue
+        parts = line.split("\t")
+        if len(parts) < 3:
+            continue
+        added_raw, deleted_raw, raw_path = parts[0], parts[1], "\t".join(parts[2:])
+        added = int(added_raw) if added_raw.isdigit() else None
+        deleted = int(deleted_raw) if deleted_raw.isdigit() else None
+        stats[_numstat_new_path(raw_path)] = (added, deleted)
+    return stats
 
 
 def commit_pathspecs(changes: list[FileChange]) -> list[str]:

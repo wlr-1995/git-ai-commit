@@ -1,18 +1,22 @@
-"""主窗口：变更文件勾选 + AI 生成 + 提交。"""
+"""主窗口：变更列表勾选 + AI 生成 + 提交。"""
 
 import re
 import unicodedata
+from pathlib import Path
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
-    QListWidget,
-    QListWidgetItem,
     QMainWindow,
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
+    QTableWidget,
+    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -99,6 +103,26 @@ def _error_summary(message: str) -> str:
     return first_line[:_ERROR_SUMMARY_LIMIT] + "…"
 
 
+#: 变更表格的列（首列内含勾选框与路径，与 TortoiseGit 的「检查修改」一致）。
+_TABLE_COLUMNS = ("路径", "扩展名", "状态", "添加行数", "删除行数")
+
+#: 「选中：」过滤链接行。
+_FILTER_HTML = (
+    "选中： "
+    '<a href="all">全部(A)</a> '
+    '<a href="none">无(N)</a> '
+    '<a href="untracked">未版本控制</a> '
+    '<a href="added">已添加</a> '
+    '<a href="deleted">已删除</a> '
+    '<a href="modified">已修改</a>'
+)
+
+
+def _stat_text(value: int | None) -> str:
+    """行数文本：None（二进制）显示 ``-``；未统计由调用方留空。"""
+    return "-" if value is None else str(value)
+
+
 class MainWindow(QMainWindow):
     def __init__(self, repo_root: str):
         super().__init__()
@@ -127,24 +151,30 @@ class MainWindow(QMainWindow):
         self.branch_label.setWordWrap(True)
         layout.addWidget(self.branch_label)
 
-        # 提交信息（日志）在上，变更文件在下，与 TortoiseGit 提交窗口一致。
+        # 提交信息（日志）在上，变更列表在下，与 TortoiseGit 提交窗口一致。
         layout.addWidget(QLabel("提交信息"))
         self.message_edit = QPlainTextEdit()
         layout.addWidget(self.message_edit, 2)
 
-        files_header = QHBoxLayout()
-        files_header.addWidget(QLabel("变更文件"))
-        self.btn_all = QPushButton("全选")
-        self.btn_none = QPushButton("全不选")
-        self.btn_all.clicked.connect(lambda: self._set_all(True))
-        self.btn_none.clicked.connect(lambda: self._set_all(False))
-        files_header.addWidget(self.btn_all)
-        files_header.addWidget(self.btn_none)
-        files_header.addStretch(1)
-        layout.addLayout(files_header)
+        layout.addWidget(QLabel("变更列表（F5 键刷新）："))
 
-        self.list_widget = QListWidget()
-        layout.addWidget(self.list_widget, 3)
+        self.filter_label = QLabel(_FILTER_HTML)
+        self.filter_label.setTextFormat(Qt.RichText)
+        self.filter_label.setWordWrap(True)
+        self.filter_label.linkActivated.connect(self._apply_filter)
+        layout.addWidget(self.filter_label)
+
+        self.changes_table = QTableWidget(0, len(_TABLE_COLUMNS))
+        self.changes_table.setHorizontalHeaderLabels(list(_TABLE_COLUMNS))
+        self.changes_table.verticalHeader().setVisible(False)
+        self.changes_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.changes_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.changes_table.setAlternatingRowColors(True)
+        table_header = self.changes_table.horizontalHeader()
+        table_header.setSectionResizeMode(0, QHeaderView.Stretch)
+        for column in range(1, len(_TABLE_COLUMNS)):
+            table_header.setSectionResizeMode(column, QHeaderView.ResizeToContents)
+        layout.addWidget(self.changes_table, 3)
 
         actions = QHBoxLayout()
         self.btn_generate = QPushButton("AI 生成")
@@ -165,14 +195,25 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.status)
 
         self.setCentralWidget(central)
+        self._install_shortcuts()
+
+    def _install_shortcuts(self) -> None:
+        refresh_shortcut = QShortcut(QKeySequence("F5"), self)
+        refresh_shortcut.activated.connect(self.refresh)
+        # A/N 仅在表格获得焦点时生效，避免与「提交信息」输入框冲突。
+        for key, kind in (("A", "all"), ("N", "none")):
+            shortcut = QShortcut(QKeySequence(key), self.changes_table)
+            shortcut.setContext(Qt.WidgetShortcut)
+            shortcut.activated.connect(lambda name=kind: self._apply_filter(name))
 
     # --- 数据 ---
 
     def _load_snapshot(self) -> dict:
-        """一次性读取分支与变更，供后台线程调用。"""
+        """一次性读取分支、变更与行数统计，供后台线程调用。"""
         return {
             "branch": repo.current_branch(self.repo_root),
             "changes": repo.list_changes(self.repo_root),
+            "stats": repo.diff_numstat(self.repo_root),
         }
 
     def refresh(self) -> None:
@@ -190,23 +231,41 @@ class MainWindow(QMainWindow):
 
     def _on_snapshot_loaded(self, snapshot: dict) -> None:
         self.branch_label.setText(f"分支：{snapshot.get('branch') or repo.UNKNOWN_BRANCH}")
-        self._on_changes_loaded(snapshot.get("changes") or [])
+        self._on_changes_loaded(snapshot.get("changes") or [], snapshot.get("stats") or {})
 
-    def _on_changes_loaded(self, changes) -> None:
+    def _on_changes_loaded(self, changes, stats=None) -> None:
         self._changes = list(changes)
-        self.list_widget.clear()
+        stats = stats or {}
         checked_default = self.config.get("selection", {}).get("checked_by_default", "tracked")
+
+        self.changes_table.setRowCount(0)
         for change in self._changes:
-            letter = repo.STATUS_LETTER.get(change.status, "?")
-            item = QListWidgetItem(f"[{letter}] {change.path}")
-            item.setData(Qt.UserRole, change.path)
+            row = self.changes_table.rowCount()
+            self.changes_table.insertRow(row)
+
+            path_item = QTableWidgetItem(change.path)
+            path_item.setData(Qt.UserRole, change)
             if checked_default == "all":
-                item.setCheckState(Qt.Checked)
+                path_item.setCheckState(Qt.Checked)
             elif checked_default == "none":
-                item.setCheckState(Qt.Unchecked)
+                path_item.setCheckState(Qt.Unchecked)
             else:
-                item.setCheckState(Qt.Unchecked if change.status == repo.UNTRACKED else Qt.Checked)
-            self.list_widget.addItem(item)
+                path_item.setCheckState(
+                    Qt.Unchecked if change.status == repo.UNTRACKED else Qt.Checked
+                )
+            self.changes_table.setItem(row, 0, path_item)
+
+            added, deleted = stats.get(change.path, (None, None)) if change.path in stats else (None, None)
+            has_stat = change.path in stats
+            cells = [
+                Path(change.path).suffix,
+                repo.STATUS_TEXT.get(change.status, change.status),
+                _stat_text(added) if has_stat else "",
+                _stat_text(deleted) if has_stat else "",
+            ]
+            for offset, text in enumerate(cells, start=1):
+                self.changes_table.setItem(row, offset, QTableWidgetItem(text))
+
         self.status.setText(f"共 {len(self._changes)} 个变更")
         self.btn_commit.setEnabled(bool(self._changes))
         if not self._changes:
@@ -214,16 +273,25 @@ class MainWindow(QMainWindow):
 
     def _on_refresh_failed(self, message: str) -> None:
         self._changes = []
-        self.list_widget.clear()
+        self.changes_table.setRowCount(0)
         self.btn_commit.setEnabled(False)
         self._error(f"读取变更失败：{message}")
 
+    def _table_rows(self):
+        for row in range(self.changes_table.rowCount()):
+            item = self.changes_table.item(row, 0)
+            if item is not None:
+                yield row, item
+
+    def _path_item(self, row: int) -> QTableWidgetItem | None:
+        return self.changes_table.item(row, 0)
+
     def checked_paths(self) -> list[str]:
         paths = []
-        for index in range(self.list_widget.count()):
-            item = self.list_widget.item(index)
+        for _, item in self._table_rows():
             if item.checkState() == Qt.Checked:
-                paths.append(item.data(Qt.UserRole))
+                change = item.data(Qt.UserRole)
+                paths.append(change.path if change is not None else item.text())
         return paths
 
     def checked_changes(self) -> list[repo.FileChange]:
@@ -237,8 +305,27 @@ class MainWindow(QMainWindow):
 
     def _set_all(self, checked: bool) -> None:
         state = Qt.Checked if checked else Qt.Unchecked
-        for index in range(self.list_widget.count()):
-            self.list_widget.item(index).setCheckState(state)
+        for _, item in self._table_rows():
+            item.setCheckState(state)
+
+    def _apply_filter(self, kind: str) -> None:
+        """「选中：」链接：按状态批量勾选。"""
+        if kind == "all":
+            self._set_all(True)
+            return
+        if kind == "none":
+            self._set_all(False)
+            return
+        wanted = {
+            "untracked": {repo.UNTRACKED},
+            "added": {repo.ADDED},
+            "deleted": {repo.DELETED},
+            "modified": {repo.MODIFIED, repo.RENAMED},
+        }.get(kind, set())
+        for _, item in self._table_rows():
+            change = item.data(Qt.UserRole)
+            status = change.status if change is not None else None
+            item.setCheckState(Qt.Checked if status in wanted else Qt.Unchecked)
 
     # --- 动作 ---
 

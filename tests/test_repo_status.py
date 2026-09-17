@@ -3,15 +3,18 @@ import pytest
 
 from app.core.repo import (
     ADDED,
+    CONFLICTED,
     DELETED,
     MODIFIED,
+    RENAMED,
+    STATUS_TEXT,
     UNTRACKED,
     FileChange,
     current_branch,
     find_repo_root,
     has_commits,
     list_changes,
-    parse_porcelain,
+    parse_porcelain_z,
 )
 
 
@@ -21,9 +24,9 @@ def _init_repo(path):
     subprocess.run(["git", "config", "user.email", "t@example.com"], cwd=path, capture_output=True)
 
 
-def test_parse_porcelain_basic():
-    text = " M a.py\n?? b 文件.txt\n D c.py\n"
-    changes = parse_porcelain(text)
+def test_parse_porcelain_z_basic():
+    text = " M a.py\0?? b 文件.txt\0 D c.py\0"
+    changes = parse_porcelain_z(text)
     assert changes == [
         FileChange(path="a.py", status=MODIFIED),
         FileChange(path="b 文件.txt", status=UNTRACKED),
@@ -31,16 +34,23 @@ def test_parse_porcelain_basic():
     ]
 
 
-def test_parse_porcelain_rename():
-    text = "R  old.py -> new.py\n"
-    changes = parse_porcelain(text)
-    assert changes[0].status == "renamed"
-    assert changes[0].path == "new.py"
-    assert changes[0].orig_path == "old.py"
+def test_parse_porcelain_z_rename_has_new_then_orig():
+    text = "R  new.py\0old.py\0"
+    changes = parse_porcelain_z(text)
+    assert changes == [FileChange(path="new.py", status=RENAMED, orig_path="old.py")]
 
 
-def test_parse_porcelain_ignores_ignored():
-    assert parse_porcelain("!! cache/\n") == []
+def test_parse_porcelain_z_ignores_ignored():
+    assert parse_porcelain_z("!! cache/\0") == []
+
+
+def test_list_changes_keeps_spaces_in_path(tmp_path):
+    _init_repo(tmp_path)
+    (tmp_path / "a b.txt").write_text("x", encoding="utf-8")
+
+    changes = list_changes(tmp_path)
+
+    assert [change.path for change in changes] == ["a b.txt"]
 
 
 def test_find_repo_root_returns_none_outside_repo(tmp_path):
@@ -112,3 +122,12 @@ def test_current_branch_detached_head(tmp_path):
     ).stdout.strip()
     subprocess.run(["git", "checkout", "--detach", "HEAD"], cwd=tmp_path, capture_output=True, check=True)
     assert current_branch(tmp_path) == f"游离 HEAD ({sha})"
+
+
+def test_status_text_is_chinese():
+    assert STATUS_TEXT[MODIFIED] == "已修改"
+    assert STATUS_TEXT[ADDED] == "已添加"
+    assert STATUS_TEXT[DELETED] == "已删除"
+    assert STATUS_TEXT[RENAMED] == "已重命名"
+    assert STATUS_TEXT[UNTRACKED] == "未版本控制"
+    assert STATUS_TEXT[CONFLICTED] == "冲突"
