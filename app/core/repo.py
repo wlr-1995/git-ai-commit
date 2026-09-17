@@ -30,8 +30,11 @@ class FileChange:
 
 
 def find_repo_root(start_path) -> str | None:
-    """返回仓库根目录；不是仓库则返回 None。"""
-    code, out, _ = run_git(["rev-parse", "--show-toplevel"], cwd=start_path, check=False)
+    """返回仓库根目录；不是仓库（含路径无效）则返回 None。"""
+    try:
+        code, out, _ = run_git(["rev-parse", "--show-toplevel"], cwd=start_path, check=False)
+    except GitError:
+        return None
     if code != 0:
         return None
     root = out.strip()

@@ -46,6 +46,10 @@ def test_find_repo_root_returns_none_outside_repo(tmp_path):
     assert find_repo_root(tmp_path) is None
 
 
+def test_find_repo_root_returns_none_for_nonexistent_path(tmp_path):
+    assert find_repo_root(tmp_path / "does_not_exist") is None
+
+
 def test_find_repo_root_inside_repo(tmp_path):
     _init_repo(tmp_path)
     sub = tmp_path / "sub"

@@ -18,6 +18,10 @@ from ..core import ai, repo
 from ..core.config import load_config
 from .worker import FunctionWorker
 
+REFRESH = "refresh"
+GENERATE = "generate"
+COMMIT = "commit"
+
 
 class MainWindow(QMainWindow):
     def __init__(self, repo_root: str):
@@ -25,6 +29,8 @@ class MainWindow(QMainWindow):
         self.repo_root = repo_root
         self.config = load_config()
         self._worker: FunctionWorker | None = None
+        self._operation: str | None = None
+        self._pending_refresh = False
         self._changes: list[repo.FileChange] = []
 
         self.setWindowTitle("AI 提交")
@@ -80,11 +86,20 @@ class MainWindow(QMainWindow):
     # --- 数据 ---
 
     def refresh(self) -> None:
-        try:
-            self._changes = repo.list_changes(self.repo_root)
-        except Exception as exc:  # noqa: BLE001
-            self._error(f"读取变更失败：{exc}")
+        """异步读取变更；若已有操作在跑，则排队到该操作结束后执行。"""
+        if self._worker is not None:
+            self._pending_refresh = True
             return
+        self._run_worker(
+            lambda: repo.list_changes(self.repo_root),
+            self._on_changes_loaded,
+            start_text="正在读取变更…",
+            operation=REFRESH,
+            on_failure=self._on_refresh_failed,
+        )
+
+    def _on_changes_loaded(self, changes) -> None:
+        self._changes = list(changes)
         self.list_widget.clear()
         checked_default = self.config.get("selection", {}).get("checked_by_default", "tracked")
         for change in self._changes:
@@ -102,6 +117,12 @@ class MainWindow(QMainWindow):
         self.btn_commit.setEnabled(bool(self._changes))
         if not self._changes:
             self.message_edit.setPlainText("")
+
+    def _on_refresh_failed(self, message: str) -> None:
+        self._changes = []
+        self.list_widget.clear()
+        self.btn_commit.setEnabled(False)
+        self._error(f"读取变更失败：{message}")
 
     def checked_paths(self) -> list[str]:
         paths = []
@@ -136,7 +157,9 @@ class MainWindow(QMainWindow):
                 raise RuntimeError("勾选的文件没有可分析的改动")
             return ai.generate_commit_message(diff_text, api_cfg)
 
-        self._run_worker(job, self._on_generated, start_text="正在生成…")
+        self._run_worker(
+            job, self._on_generated, start_text="正在生成…", operation=GENERATE, cancellable=True
+        )
 
     def on_commit(self) -> None:
         paths = self.checked_paths()
@@ -152,29 +175,59 @@ class MainWindow(QMainWindow):
             repo.stage(self.repo_root, paths)
             return repo.commit(self.repo_root, message, paths)
 
-        self._run_worker(job, self._on_committed, start_text="正在提交…")
+        self._run_worker(job, self._on_committed, start_text="正在提交…", operation=COMMIT)
 
     def on_cancel(self) -> None:
-        if self._worker is not None:
+        # 仅 AI 生成可取消；提交一旦开始必须跑完，取消会隐藏真实发生的提交。
+        if self._worker is not None and self._operation == GENERATE:
             self._worker.cancel()
             self.status.setText("已取消")
 
     # --- 线程辅助 ---
 
-    def _run_worker(self, fn, on_success, start_text: str) -> None:
-        self._set_busy(True)
+    def _run_worker(
+        self,
+        fn,
+        on_success,
+        start_text: str,
+        operation: str,
+        cancellable: bool = False,
+        on_failure=None,
+    ) -> None:
+        if self._worker is not None:
+            self._error("当前有操作正在进行，请稍候")
+            return
+        self._operation = operation
+        self._set_busy(True, cancellable)
         self.status.setText(start_text)
         worker = FunctionWorker(fn)
         worker.succeeded.connect(on_success)
-        worker.failed.connect(self._error)
-        worker.finished.connect(lambda: self._set_busy(False))
+        worker.failed.connect(on_failure or self._error)
+        worker.finished.connect(self._on_worker_finished)
         self._worker = worker
         worker.start()
 
-    def _set_busy(self, busy: bool) -> None:
+    def _on_worker_finished(self) -> None:
+        self._worker = None
+        self._operation = None
+        self._set_busy(False)
+        if self._pending_refresh:
+            self._pending_refresh = False
+            self.refresh()
+
+    def _set_busy(self, busy: bool, cancellable: bool = False) -> None:
         self.btn_generate.setEnabled(not busy)
         self.btn_commit.setEnabled(not busy and bool(self._changes))
-        self.btn_cancel.setEnabled(busy)
+        self.btn_cancel.setEnabled(busy and cancellable)
+
+    def closeEvent(self, event) -> None:  # noqa: N802 - Qt 命名
+        worker = self._worker
+        if worker is not None and worker.isRunning():
+            worker.cancel()
+            if not worker.wait(5000):
+                event.ignore()
+                return
+        event.accept()
 
     def _on_generated(self, text: str) -> None:
         self.message_edit.setPlainText(text)

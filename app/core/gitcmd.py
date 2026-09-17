@@ -28,10 +28,14 @@ def run_git(
             capture_output=True,
             timeout=timeout,
         )
+    except NotADirectoryError as exc:
+        raise GitError(f"工作目录无效（不存在或不是目录）: {cwd}") from exc
     except FileNotFoundError as exc:
         raise GitError("找不到 git 命令，请确认已安装 Git 并加入 PATH") from exc
     except subprocess.TimeoutExpired as exc:
         raise GitError(f"git 命令超时: {' '.join(args)}") from exc
+    except OSError as exc:
+        raise GitError(f"git 命令无法执行: {exc}") from exc
 
     stdout = proc.stdout.decode("utf-8", errors="replace")
     stderr = proc.stderr.decode("utf-8", errors="replace")
