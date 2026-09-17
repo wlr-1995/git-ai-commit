@@ -40,8 +40,10 @@ def main(argv: list[str] | None = None) -> int:
 
         from app.core.repo import find_repo_root
         from app.ui.main_window import MainWindow
+        from app.ui.theme import apply_light_theme
 
         app = QApplication(argv)
+        apply_light_theme(app)
         root = find_repo_root(start)
         if root is None:
             QMessageBox.critical(None, "AI 提交", f"该目录不是 Git 仓库：\n{start}")
