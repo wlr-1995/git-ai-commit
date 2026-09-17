@@ -87,6 +87,21 @@ def test_close_without_worker_accepts(qapp, tmp_path, monkeypatch):
     assert event.isAccepted() is True
 
 
+def test_layout_puts_message_above_file_list(qapp, tmp_path, monkeypatch):
+    window = _make_window(tmp_path, monkeypatch)
+    layout = window.centralWidget().layout()
+
+    assert layout.indexOf(window.message_edit) < layout.indexOf(window.list_widget)
+
+
+def test_snapshot_loaded_shows_branch(qapp, tmp_path, monkeypatch):
+    window = _make_window(tmp_path, monkeypatch)
+
+    window._on_snapshot_loaded({"branch": "trunk", "changes": []})
+
+    assert "trunk" in window.branch_label.text()
+
+
 def test_error_summary_truncates_long_text():
     summary = mw._error_summary("a" * 400)
     assert summary.endswith("…")

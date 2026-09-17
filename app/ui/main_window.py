@@ -123,22 +123,28 @@ class MainWindow(QMainWindow):
         self.header.setWordWrap(True)
         layout.addWidget(self.header)
 
-        buttons = QHBoxLayout()
+        self.branch_label = QLabel("分支：读取中…")
+        self.branch_label.setWordWrap(True)
+        layout.addWidget(self.branch_label)
+
+        # 提交信息（日志）在上，变更文件在下，与 TortoiseGit 提交窗口一致。
+        layout.addWidget(QLabel("提交信息"))
+        self.message_edit = QPlainTextEdit()
+        layout.addWidget(self.message_edit, 2)
+
+        files_header = QHBoxLayout()
+        files_header.addWidget(QLabel("变更文件"))
         self.btn_all = QPushButton("全选")
         self.btn_none = QPushButton("全不选")
         self.btn_all.clicked.connect(lambda: self._set_all(True))
         self.btn_none.clicked.connect(lambda: self._set_all(False))
-        buttons.addWidget(self.btn_all)
-        buttons.addWidget(self.btn_none)
-        buttons.addStretch(1)
-        layout.addLayout(buttons)
+        files_header.addWidget(self.btn_all)
+        files_header.addWidget(self.btn_none)
+        files_header.addStretch(1)
+        layout.addLayout(files_header)
 
         self.list_widget = QListWidget()
         layout.addWidget(self.list_widget, 3)
-
-        layout.addWidget(QLabel("提交信息"))
-        self.message_edit = QPlainTextEdit()
-        layout.addWidget(self.message_edit, 2)
 
         actions = QHBoxLayout()
         self.btn_generate = QPushButton("AI 生成")
@@ -162,18 +168,29 @@ class MainWindow(QMainWindow):
 
     # --- 数据 ---
 
+    def _load_snapshot(self) -> dict:
+        """一次性读取分支与变更，供后台线程调用。"""
+        return {
+            "branch": repo.current_branch(self.repo_root),
+            "changes": repo.list_changes(self.repo_root),
+        }
+
     def refresh(self) -> None:
-        """异步读取变更；若已有操作在跑，则排队到该操作结束后执行。"""
+        """异步读取分支与变更；若已有操作在跑，则排队到该操作结束后执行。"""
         if self._worker is not None:
             self._pending_refresh = True
             return
         self._run_worker(
-            lambda: repo.list_changes(self.repo_root),
-            self._on_changes_loaded,
+            self._load_snapshot,
+            self._on_snapshot_loaded,
             start_text="正在读取变更…",
             operation=REFRESH,
             on_failure=self._on_refresh_failed,
         )
+
+    def _on_snapshot_loaded(self, snapshot: dict) -> None:
+        self.branch_label.setText(f"分支：{snapshot.get('branch') or repo.UNKNOWN_BRANCH}")
+        self._on_changes_loaded(snapshot.get("changes") or [])
 
     def _on_changes_loaded(self, changes) -> None:
         self._changes = list(changes)

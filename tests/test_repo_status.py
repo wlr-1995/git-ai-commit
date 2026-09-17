@@ -7,6 +7,7 @@ from app.core.repo import (
     MODIFIED,
     UNTRACKED,
     FileChange,
+    current_branch,
     find_repo_root,
     has_commits,
     list_changes,
@@ -79,3 +80,35 @@ def test_has_commits(tmp_path):
     subprocess.run(["git", "add", "."], cwd=tmp_path, capture_output=True, check=True)
     subprocess.run(["git", "commit", "-m", "init"], cwd=tmp_path, capture_output=True, check=True)
     assert has_commits(tmp_path) is True
+
+
+def _init_repo_on_trunk(path):
+    subprocess.run(["git", "init", "-b", "trunk"], cwd=path, capture_output=True, check=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=path, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "t@example.com"], cwd=path, capture_output=True)
+
+
+def test_current_branch_on_unborn_branch(tmp_path):
+    _init_repo_on_trunk(tmp_path)
+    assert current_branch(tmp_path) == "trunk"
+
+
+def test_current_branch_after_commit(tmp_path):
+    _init_repo_on_trunk(tmp_path)
+    (tmp_path / "a.txt").write_text("a", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=tmp_path, capture_output=True, check=True)
+    subprocess.run(["git", "commit", "-m", "init"], cwd=tmp_path, capture_output=True, check=True)
+    assert current_branch(tmp_path) == "trunk"
+
+
+def test_current_branch_detached_head(tmp_path):
+    _init_repo_on_trunk(tmp_path)
+    (tmp_path / "a.txt").write_text("a", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=tmp_path, capture_output=True, check=True)
+    subprocess.run(["git", "commit", "-m", "init"], cwd=tmp_path, capture_output=True, check=True)
+    sha = subprocess.run(
+        ["git", "rev-parse", "--short", "HEAD"],
+        cwd=tmp_path, capture_output=True, text=True, encoding="utf-8", check=True,
+    ).stdout.strip()
+    subprocess.run(["git", "checkout", "--detach", "HEAD"], cwd=tmp_path, capture_output=True, check=True)
+    assert current_branch(tmp_path) == f"游离 HEAD ({sha})"

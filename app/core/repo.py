@@ -12,6 +12,9 @@ RENAMED = "renamed"
 UNTRACKED = "untracked"
 CONFLICTED = "conflicted"
 
+#: 无法判断当前分支时的显示文本。
+UNKNOWN_BRANCH = "未知"
+
 #: 未跟踪文件参与 diff 分析时的大小上限；超过则只给标记，不读取内容。
 _MAX_UNTRACKED_BYTES = 512 * 1024
 
@@ -42,6 +45,17 @@ def find_repo_root(start_path) -> str | None:
         return None
     root = out.strip()
     return root or None
+
+
+def current_branch(repo_root) -> str:
+    """返回当前分支名；游离 HEAD 返回短 SHA，无法判断时返回「未知」。"""
+    code, out, _ = run_git(["symbolic-ref", "--short", "-q", "HEAD"], cwd=repo_root, check=False)
+    if code == 0 and out.strip():
+        return out.strip()
+    code, out, _ = run_git(["rev-parse", "--short", "HEAD"], cwd=repo_root, check=False)
+    if code == 0 and out.strip():
+        return f"游离 HEAD ({out.strip()})"
+    return UNKNOWN_BRANCH
 
 
 def _status_of(xy: str) -> str:
