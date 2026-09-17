@@ -127,7 +127,8 @@ def test_spaces_stay_on_scale(qapp):
 
 
 def test_main_applies_light_theme(monkeypatch):
-    """入口必须在建窗口前套用白色主题，否则系统深色模式下会变黑底。"""
+    """入口必须在建窗口前套用配置里的样式，否则系统深色模式下会变黑底。"""
+    import app.core.config as config_module
     import app.core.repo as repo_module
     import app.main as main_module
     import app.ui.main_window as mw_module
@@ -150,13 +151,16 @@ def test_main_applies_light_theme(monkeypatch):
 
     monkeypatch.setattr("PySide6.QtWidgets.QApplication", FakeApplication)
     monkeypatch.setattr(
-        theme, "apply_light_theme", lambda app: events.append(("theme", type(app).__name__))
+        theme,
+        "apply_light_theme",
+        lambda app, style=None: events.append(("theme", style)),
     )
+    monkeypatch.setattr(config_module, "load_config", lambda: {"ui": {"style": "flat"}})
     monkeypatch.setattr(repo_module, "find_repo_root", lambda start: "R")
     monkeypatch.setattr(mw_module, "MainWindow", FakeWindow)
 
     assert main_module.main(["prog", "somewhere"]) == 0
-    assert events == ["app-created", ("theme", "FakeApplication"), ("window", "R"), "shown"]
+    assert events == ["app-created", ("theme", "flat"), ("window", "R"), "shown"]
 
 
 @pytest.fixture(autouse=True)

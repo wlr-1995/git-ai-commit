@@ -38,12 +38,15 @@ def main(argv: list[str] | None = None) -> int:
     try:
         from PySide6.QtWidgets import QApplication, QMessageBox
 
+        from app.core.config import load_config
         from app.core.repo import find_repo_root
         from app.ui.main_window import MainWindow
-        from app.ui.theme import apply_light_theme
+        from app.ui.theme import DEFAULT_STYLE, apply_light_theme
 
         app = QApplication(argv)
-        apply_light_theme(app)
+        # 先按配置里的样式套主题，避免先画一帧默认样式再切换。
+        config = load_config()
+        apply_light_theme(app, config.get("ui", {}).get("style") or DEFAULT_STYLE)
         root = find_repo_root(start)
         if root is None:
             QMessageBox.critical(None, "AI 提交", f"该目录不是 Git 仓库：\n{start}")

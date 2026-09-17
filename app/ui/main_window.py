@@ -9,7 +9,9 @@ from PySide6.QtCore import QEvent, QItemSelectionModel, QPoint, QRect, Qt
 from PySide6.QtGui import QFontMetrics, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QApplication,
     QCheckBox,
+    QDialog,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -27,8 +29,9 @@ from PySide6.QtWidgets import (
 )
 
 from ..core import ai, repo
-from ..core.config import load_config
+from ..core.config import deep_merge, load_config, save_config
 from . import theme
+from .settings_dialog import SettingsDialog
 from .worker import FunctionWorker
 
 REFRESH = "refresh"
@@ -429,6 +432,11 @@ class MainWindow(QMainWindow):
         return table
 
     def _build_actions(self) -> QHBoxLayout:
+        self.btn_settings = QPushButton("设置")
+        self.btn_settings.setToolTip("选择界面样式，填写模型参数")
+        self.btn_settings.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.btn_settings.clicked.connect(self.open_settings)
+
         self.btn_generate = QPushButton("AI 生成")
         self.btn_generate.setToolTip("根据勾选的改动调用 AI 生成提交信息")
         self.btn_cancel = QPushButton("取消")
@@ -446,6 +454,7 @@ class MainWindow(QMainWindow):
 
         row = QHBoxLayout()
         row.setSpacing(theme.SPACE_SM)
+        row.addWidget(self.btn_settings)
         row.addWidget(self.btn_generate)
         row.addWidget(self.btn_cancel)
         row.addWidget(self.action_hint)
@@ -495,6 +504,38 @@ class MainWindow(QMainWindow):
         self.changes_table.setMinimumHeight(
             row_height * theme.TABLE_MIN_VISIBLE_ROWS + theme.TABLE_MIN_HEIGHT_EXTRA
         )
+
+    # --- 设置 ---
+
+    def apply_style(self, style: str) -> None:
+        """换样式：设置应用样式表并同步依赖行高的布局。
+
+        样式表是全应用级的，换样式会把所有已建窗口重新 polish，行高随之变化；
+        设置对话框的预览、取消还原、保存后应用都必须走这里。
+        """
+        app = QApplication.instance()
+        if app is not None:
+            theme.apply_style(app, style)
+        self._sync_table_min_height()
+
+    def open_settings(self) -> None:
+        """打开设置对话框：实时预览样式，取消还原，保存写盘。"""
+        dialog = SettingsDialog(self.config, on_save=self._save_settings, parent=self)
+        dialog.stylePreview.connect(self.apply_style)
+        accepted = dialog.exec() == QDialog.DialogCode.Accepted
+        if not accepted:
+            self.apply_style(dialog.original_style())
+
+    def _save_settings(self, values: dict) -> str | None:
+        """写回配置并应用新样式；失败时返回文案（对话框保持打开）。"""
+        try:
+            save_config(deep_merge(self.config, values))
+        except OSError as exc:
+            return f"保存失败：{exc}"
+        self.config = load_config()
+        self.apply_style(self.config.get("ui", {}).get("style") or theme.DEFAULT_STYLE)
+        self._set_status("设置已保存")
+        return None
 
     def resizeEvent(self, event) -> None:  # noqa: N802 - Qt 命名
         super().resizeEvent(event)

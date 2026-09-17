@@ -669,3 +669,123 @@ def test_checkbox_press_selects_row_and_focuses_table(qapp, tmp_path, monkeypatc
     assert table.selectionModel().selectedRows(), "点勾选框后没有选中该行"
     assert table.hasFocus(), "点勾选框后表格没有获得焦点"
     assert table.currentRow() == 0
+
+
+def test_settings_button_opens_dialog_with_config(qapp, tmp_path, monkeypatch):
+    from app.ui import settings_dialog as sd
+
+    seen: list = []
+
+    def fake_exec(self):
+        seen.append(self)
+        return int(sd.SettingsDialog.DialogCode.Rejected)
+
+    monkeypatch.setattr(sd.SettingsDialog, "exec", fake_exec)
+    monkeypatch.setattr(mw, "SettingsDialog", sd.SettingsDialog, raising=False)
+    window = _make_window(tmp_path, monkeypatch)
+    assert hasattr(window, "btn_settings")
+
+    window.btn_settings.click()
+
+    assert len(seen) == 1
+    assert seen[0].original_style() == window.config.get("ui", {}).get("style")
+
+
+def test_apply_style_updates_min_table_height(qapp, tmp_path, monkeypatch):
+    window = _make_window(tmp_path, monkeypatch)
+    window.show()
+    qapp.processEvents()
+
+    window.apply_style("flat")
+
+    row_height = window.changes_table.verticalHeader().defaultSectionSize()
+    assert row_height == 28, "flat 的行高应来自样式表"
+    assert (
+        window.changes_table.minimumHeight()
+        == row_height * theme.TABLE_MIN_VISIBLE_ROWS + theme.TABLE_MIN_HEIGHT_EXTRA
+    )
+    window.apply_style(theme.DEFAULT_STYLE)
+
+
+def test_open_settings_saves_and_reloads_config(qapp, tmp_path, monkeypatch):
+    import json
+
+    from app.core import config as config_module
+    from app.ui import settings_dialog as sd
+
+    cfg_path = tmp_path / "config.json"
+    monkeypatch.setattr(config_module, "CONFIG_FILE", cfg_path)
+    monkeypatch.setattr(mw, "SettingsDialog", sd.SettingsDialog, raising=False)
+
+    def fake_exec(self):
+        self.url_edit.setText("http://example.test/v1")
+        self.model_edit.setText("demo-model")
+        self.api_key_edit.setText("k")
+        self.timeout_spin.setValue(15)
+        flat = self.style_combo.findData("flat")
+        self.style_combo.setCurrentIndex(flat)
+        self.btn_save.click()
+        return self.result()
+
+    monkeypatch.setattr(sd.SettingsDialog, "exec", fake_exec)
+    window = _make_window(tmp_path, monkeypatch)
+    # _make_window 把 load_config 钉成常量，这里要测「重新读盘」，换回真实装载器
+    #（真正读的文件由上面打桩的 CONFIG_FILE 指定）。
+    monkeypatch.setattr(mw, "load_config", config_module.load_config)
+    window.open_settings()
+
+    saved = json.loads(cfg_path.read_text(encoding="utf-8"))
+    assert saved["api"]["url"] == "http://example.test/v1"
+    assert saved["api"]["model"] == "demo-model"
+    assert saved["api"]["api_key"] == "k"
+    assert saved["api"]["timeout"] == 15
+    assert saved["ui"]["style"] == "flat"
+    assert window.config["api"]["url"] == "http://example.test/v1"
+    assert "已保存" in window.status.text()
+    window.apply_style(theme.DEFAULT_STYLE)
+
+
+def test_open_settings_cancel_restores_style_and_writes_nothing(qapp, tmp_path, monkeypatch):
+    from app.core import config as config_module
+    from app.ui import settings_dialog as sd
+
+    cfg_path = tmp_path / "config.json"
+    monkeypatch.setattr(config_module, "CONFIG_FILE", cfg_path)
+    monkeypatch.setattr(mw, "SettingsDialog", sd.SettingsDialog, raising=False)
+    window = _make_window(tmp_path, monkeypatch)
+    window.apply_style(theme.DEFAULT_STYLE)  # 固定起点，免受同会话其它用例影响
+    before = qapp.styleSheet()
+
+    def fake_exec(self):
+        # 模拟用户先预览了 flat，然后取消
+        flat = self.style_combo.findData("flat")
+        self.style_combo.setCurrentIndex(flat)
+        window.apply_style("flat")
+        self.reject()
+        return self.result()
+
+    monkeypatch.setattr(sd.SettingsDialog, "exec", fake_exec)
+    window.open_settings()
+
+    assert qapp.styleSheet() == before, "取消后必须还原打开前的样式"
+    assert not cfg_path.exists(), "取消不应写盘"
+
+
+def test_save_settings_failure_returns_error_and_keeps_config(qapp, tmp_path, monkeypatch):
+    from app.core import config as config_module
+
+    cfg_path = tmp_path / "config.json"
+    monkeypatch.setattr(config_module, "CONFIG_FILE", cfg_path)
+    window = _make_window(tmp_path, monkeypatch)
+    before = copy.deepcopy(window.config)
+
+    def boom(_config):
+        raise OSError("磁盘只读")
+
+    monkeypatch.setattr(mw, "save_config", boom)
+
+    error = window._save_settings({"api": {"url": "http://x/v1"}, "ui": {"style": "flat"}})
+
+    assert error is not None and "保存失败" in error
+    assert window.config == before, "保存失败时内存配置不应变化"
+    assert not cfg_path.exists()
