@@ -29,44 +29,41 @@ LAYOUT_SPACING = SPACE_SM
 
 #: 中性色。
 BACKGROUND = "#ffffff"
-SURFACE = "#f6f8fa"
-SURFACE_HOVER = "#eef1f4"
-SURFACE_PRESSED = "#e3e7eb"
-SURFACE_DISABLED = "#fafbfc"
-BORDER = "#d8dee4"
-BORDER_STRONG = "#c3ccd6"
-GRID = "#e6e9ed"
-HEADER_BG = "#f2f4f7"
-ZEBRA = "#f7f9fb"
+SURFACE = "#f6f6f6"
+SURFACE_HOVER = "#eeeeee"
+SURFACE_PRESSED = "#e3e3e3"
+SURFACE_DISABLED = "#fafafa"
+BORDER = "#d9d9d9"
+BORDER_STRONG = "#c4c4c4"
+GRID = "#e6e6e6"
+HEADER_BG = "#f2f2f2"
+ZEBRA = "#f7f7f7"
 
 #: 文字。
-TEXT = "#1f2328"
-TEXT_MUTED = "#656d76"
-TEXT_DISABLED = "#9aa0a6"
-TEXT_ON_ACCENT = "#ffffff"
+TEXT = "#1f1f1f"
+TEXT_MUTED = "#6b6b6b"
+TEXT_DISABLED = "#9e9e9e"
+TEXT_INVERSE = "#ffffff"
 
-#: 强调色（蓝色）。
-ACCENT = "#2f6fdd"
-ACCENT_HOVER = "#245bb8"
-ACCENT_PRESSED = "#1d4a96"
-ACCENT_SOFT = "#dbe9ff"
-ACCENT_SOFT_BORDER = "#bcd4f8"
+#: 单色强调：整套界面只用黑、白与灰阶，「强调」用近黑而不是彩色。
+INK = "#1f1f1f"
+INK_HOVER = "#000000"
+INK_PRESSED = "#000000"
+INK_SOFT = "#ededed"
+INK_SOFT_BORDER = "#d9d9d9"
 
-#: 语义色（成功/警告/危险/重命名），状态列与错误提示复用。
-SUCCESS = "#1a7f37"
-WARNING = "#9a6700"
-DANGER = "#cf222e"
-RENAME = "#8250df"
-
-#: 状态语义色：同一含义在界面中始终同色。
+#: 状态只用灰阶区分（未跟踪弱化），需要立刻处理的状态用加粗而不是颜色。
 STATUS_COLORS = {
-    "modified": WARNING,
-    "added": SUCCESS,
-    "deleted": DANGER,
-    "renamed": RENAME,
+    "modified": TEXT,
+    "added": TEXT,
+    "deleted": TEXT,
+    "renamed": TEXT,
     "untracked": TEXT_MUTED,
-    "conflicted": DANGER,
+    "conflicted": TEXT,
 }
+
+#: 需要立刻处理的状态：加粗突出，避免引入颜色。
+BOLD_STATUSES = frozenset({"conflicted"})
 
 #: 界面字体：中文优先微软雅黑 UI，回退到雅黑 / Segoe UI。
 FONT_FAMILIES = ("Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI")
@@ -87,7 +84,7 @@ QPlainTextEdit, QTextEdit {{
     border-radius: 4px;
     padding: {SPACE_XS}px {SPACE_SM}px;
 }}
-QPlainTextEdit:focus, QTextEdit:focus {{ border: 1px solid {ACCENT}; }}
+QPlainTextEdit:focus, QTextEdit:focus {{ border: 1px solid {INK}; }}
 QTableWidget {{
     background: {BACKGROUND};
     alternate-background-color: {ZEBRA};
@@ -96,7 +93,7 @@ QTableWidget {{
     gridline-color: {GRID};
 }}
 QTableWidget::item {{ padding: 0 {SPACE_XS}px; }}
-QTableWidget::item:selected {{ background: {ACCENT_SOFT}; color: {TEXT}; }}
+QTableWidget::item:selected {{ background: {INK_SOFT}; color: {TEXT}; }}
 QHeaderView {{ background: {HEADER_BG}; }}
 QHeaderView::section {{
     background: {HEADER_BG};
@@ -129,13 +126,18 @@ def section_font() -> QFont:
     return font
 
 
-def accent_color() -> QColor:
-    return QColor(ACCENT)
+def ink_color() -> QColor:
+    return QColor(INK)
 
 
 def status_color(status: str) -> QColor:
-    """状态语义色，未知状态回退到正文色。"""
+    """状态文字色：单色方案下只有正文色与弱化灰，未知状态回退正文色。"""
     return QColor(STATUS_COLORS.get(status, TEXT))
+
+
+def status_is_bold(status: str) -> bool:
+    """需要立刻处理的状态用加粗表达（不引入颜色）。"""
+    return status in BOLD_STATUSES
 
 
 def light_palette() -> QPalette:
@@ -149,11 +151,11 @@ def light_palette() -> QPalette:
         (QPalette.ColorRole.Text, TEXT),
         (QPalette.ColorRole.Button, SURFACE),
         (QPalette.ColorRole.ButtonText, TEXT),
-        (QPalette.ColorRole.BrightText, TEXT_ON_ACCENT),
-        (QPalette.ColorRole.Highlight, ACCENT),
-        (QPalette.ColorRole.HighlightedText, TEXT_ON_ACCENT),
-        (QPalette.ColorRole.Link, ACCENT),
-        (QPalette.ColorRole.LinkVisited, ACCENT),
+        (QPalette.ColorRole.BrightText, TEXT_INVERSE),
+        (QPalette.ColorRole.Highlight, INK),
+        (QPalette.ColorRole.HighlightedText, TEXT_INVERSE),
+        (QPalette.ColorRole.Link, INK),
+        (QPalette.ColorRole.LinkVisited, INK),
         (QPalette.ColorRole.ToolTipBase, BACKGROUND),
         (QPalette.ColorRole.ToolTipText, TEXT),
         (QPalette.ColorRole.PlaceholderText, TEXT_DISABLED),
@@ -177,14 +179,14 @@ def app_icon() -> QIcon:
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
     painter.setPen(Qt.PenStyle.NoPen)
-    painter.setBrush(accent_color())
+    painter.setBrush(ink_color())
     painter.drawRoundedRect(QRect(2, 2, size - 4, size - 4), 14, 14)
     font = QFont()
     font.setFamilies(list(FONT_FAMILIES))
     font.setPointSize(24)
     font.setWeight(QFont.Weight.Bold)
     painter.setFont(font)
-    painter.setPen(QColor(TEXT_ON_ACCENT))
+    painter.setPen(QColor(TEXT_INVERSE))
     painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, "AI")
     painter.end()
     return QIcon(pixmap)
@@ -199,11 +201,11 @@ QPlainTextEdit, QTextEdit, QLineEdit {{
     border: 1px solid {BORDER};
     border-radius: {RADIUS}px;
     padding: {SPACE_SM}px;
-    selection-background-color: {ACCENT_SOFT};
+    selection-background-color: {INK_SOFT};
     selection-color: {TEXT};
 }}
 QPlainTextEdit:focus, QTextEdit:focus, QLineEdit:focus {{
-    border: 1px solid {ACCENT};
+    border: 1px solid {INK};
 }}
 QPushButton {{
     background: {SURFACE};
@@ -213,20 +215,20 @@ QPushButton {{
 }}
 QPushButton:hover {{ background: {SURFACE_HOVER}; }}
 QPushButton:pressed {{ background: {SURFACE_PRESSED}; }}
-QPushButton:focus {{ border: 1px solid {ACCENT}; }}
+QPushButton:focus {{ border: 1px solid {INK}; }}
 QPushButton:disabled {{
     background: {SURFACE_DISABLED};
     border-color: {GRID};
     color: {TEXT_DISABLED};
 }}
 QPushButton#primaryButton {{
-    background: {ACCENT};
-    border: 1px solid {ACCENT};
-    color: {TEXT_ON_ACCENT};
+    background: {INK};
+    border: 1px solid {INK};
+    color: {TEXT_INVERSE};
     font-weight: 600;
 }}
-QPushButton#primaryButton:hover {{ background: {ACCENT_HOVER}; border-color: {ACCENT_HOVER}; }}
-QPushButton#primaryButton:pressed {{ background: {ACCENT_PRESSED}; }}
+QPushButton#primaryButton:hover {{ background: {INK_HOVER}; border-color: {INK_HOVER}; }}
+QPushButton#primaryButton:pressed {{ background: {INK_PRESSED}; }}
 QPushButton#primaryButton:disabled {{
     background: {SURFACE_PRESSED};
     border-color: {BORDER};
@@ -237,13 +239,13 @@ QPushButton#chip {{
     border: 1px solid transparent;
     border-radius: 10px;
     padding: 2px 10px;
-    color: {ACCENT};
+    color: {INK};
 }}
 QPushButton#chip:hover {{
-    background: {ACCENT_SOFT};
-    border-color: {ACCENT_SOFT_BORDER};
+    background: {INK_SOFT};
+    border-color: {INK_SOFT_BORDER};
 }}
-QPushButton#chip:pressed {{ background: {ACCENT_SOFT_BORDER}; }}
+QPushButton#chip:pressed {{ background: {INK_SOFT_BORDER}; }}
 QLabel#repoName {{
     font-weight: 600;
     font-size: 11pt;
@@ -253,10 +255,10 @@ QLabel#repoPath {{
     font-size: {FONT_SIZE_SMALL}pt;
 }}
 QLabel#branchChip {{
-    background: {ACCENT_SOFT};
-    border: 1px solid {ACCENT_SOFT_BORDER};
+    background: {INK_SOFT};
+    border: 1px solid {INK_SOFT_BORDER};
     border-radius: 9px;
-    color: {ACCENT_PRESSED};
+    color: {INK_PRESSED};
     font-size: {FONT_SIZE_SMALL}pt;
     padding: 1px 10px;
 }}

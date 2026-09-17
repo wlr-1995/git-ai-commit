@@ -349,7 +349,7 @@ def test_empty_state_explains_clean_and_filtered(qapp, tmp_path, monkeypatch):
     assert "未显示任何文件" in window.empty_state.text()
 
 
-def test_numeric_columns_right_aligned_and_status_colored(qapp, tmp_path, monkeypatch):
+def test_numeric_columns_right_aligned_and_status_monochrome(qapp, tmp_path, monkeypatch):
     window = _make_window(tmp_path, monkeypatch)
     window._on_changes_loaded(_changes_fixture(), {"a.txt": (2, 1)})
     table = window.changes_table
@@ -358,8 +358,9 @@ def test_numeric_columns_right_aligned_and_status_colored(qapp, tmp_path, monkey
         assert table.item(0, column).textAlignment() & int(Qt.AlignmentFlag.AlignRight)
 
     rows = {table.item(row, 0).text(): row for row in range(table.rowCount())}
-    assert table.item(rows["a.txt"], 2).foreground().color().name() == theme.WARNING
-    assert table.item(rows["gone.txt"], 2).foreground().color().name() == theme.DANGER
+    # 黑白两色：状态只用正文色与弱化灰，不再按语义上色
+    assert table.item(rows["a.txt"], 2).foreground().color().name() == theme.TEXT
+    assert table.item(rows["gone.txt"], 2).foreground().color().name() == theme.TEXT
     assert table.item(rows["new.txt"], 2).foreground().color().name() == theme.TEXT_MUTED
 
 

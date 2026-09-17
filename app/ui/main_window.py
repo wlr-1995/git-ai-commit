@@ -488,6 +488,8 @@ class MainWindow(QMainWindow):
         status_item = QTableWidgetItem(repo.STATUS_TEXT.get(change.status, change.status))
         status_item.setForeground(theme.status_color(change.status))
         status_item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        if theme.status_is_bold(change.status):
+            status_item.setFont(theme.section_font())
 
         cells = (
             suffix_item,
@@ -540,8 +542,10 @@ class MainWindow(QMainWindow):
     # --- 汇总与选择 ---
 
     def _set_status(self, text: str, error: bool = False) -> None:
+        """状态栏文字。单色方案下「出错」用正文色 + 加粗，不用红色。"""
         self.status.setText(text)
-        self.status.setStyleSheet(f"color: {theme.DANGER};" if error else "")
+        font = theme.section_font() if error else theme.base_font()
+        self.status.setFont(font)
 
     def _update_summary(self) -> None:
         """统一刷新状态栏、空状态与按钮可用性，避免各处各写一套。"""
