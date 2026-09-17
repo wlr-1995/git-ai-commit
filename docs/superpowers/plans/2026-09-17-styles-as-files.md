@@ -16,7 +16,7 @@
 - 运行时依赖只有 `PySide6`、`requests`；测试依赖 `pytest`，不新增任何依赖
 - 只有黑白灰阶：`.qss` 里每个颜色都必须 `r == g == b`；`theme.py` 里不得出现任何颜色字面值（唯一例外：窗口图标用 `Qt.GlobalColor.black/white`）
 - 样式文件编码 UTF-8、换行 LF；`url("...")` 一律相对该 `.qss` 文件所在目录
-- 间距只用 4/8/12/16/24；圆角只用 6（表格/输入框的历史覆盖值 4 保留，见 Task 1 注意事项）
+- 间距只用 4/8/12/16/24 的刻度、圆角沿用样式文件里的既有值（`6`，以及表格/输入框的历史覆盖值 `4`；勾选框 `3`、胶囊 `10`/`9` 也是既有值）——不引入新的一次性数值，也不"顺手统一"既有值，因为本重构要求外观不变
 - 文案中文；所有 git/AI 调用不得在 UI 主线程
 - 测试统一跑 `python -m pytest -q`（`tests/conftest.py` 已设 offscreen 并套真实主题，不要绕过）
 - 提交信息用英文 `type(scope): subject` 风格，与既有历史一致
@@ -1612,7 +1612,7 @@ Expected: `窗口正常打开`、`stderr: (空)`、`残留 python 进程: 0`
 写 `%TEMP%\opencode\style_switch.py`（**必须写文件并 `os._exit(0)` 收尾**：内联 `python -c` 在创建 QApplication 后可能挂死或崩溃）：
 
 ```python
-"""非 offscreen 启动，确认两套样式都能装上去。"""
+"""非 offscreen 启动，确认两套样式都能装上去，且弹窗/tooltip 不漏色。"""
 
 import sys
 from pathlib import Path
@@ -1620,9 +1620,16 @@ from pathlib import Path
 sys.path.insert(0, str(Path(r"D:\wlr\ai\git-ai-commit")))
 
 import app  # noqa: E402,F401
-from PySide6.QtWidgets import QApplication  # noqa: E402
+from PySide6.QtCore import QPoint  # noqa: E402
+from PySide6.QtWidgets import QApplication, QLabel, QToolTip  # noqa: E402
 
 from app.ui import theme  # noqa: E402
+
+
+def saturation(color) -> int:
+    return max(color.red(), color.green(), color.blue()) - min(
+        color.red(), color.green(), color.blue()
+    )
 
 
 def main() -> int:
@@ -1633,7 +1640,29 @@ def main() -> int:
         length = len(window_app.styleSheet())
         print(f"{key}({label}): 样式表长度={length}", flush=True)
         assert length > 0, f"{key} 的样式表是空的"
-    print("两套样式都能应用", flush=True)
+
+        # Fusion 的默认 tooltip 是淡黄底（ToolTipBase），删掉调色板后
+        # 只能靠样式压住；这里实测 tooltip 的实际渲染色。
+        QToolTip.showText(QPoint(60, 60), "提示")
+        window_app.processEvents()
+        tips = [
+            widget
+            for widget in QApplication.topLevelWidgets()
+            if isinstance(widget, QLabel) and widget.isVisible() and widget.text() == "提示"
+        ]
+        assert tips, "tooltip 没有弹出来，无法验证"
+        image = tips[0].grab().toImage()
+        samples = [
+            image.pixelColor(image.width() - 3, image.height() // 2),
+            image.pixelColor(1, 1),
+        ]
+        for color in samples:
+            print(f"  tooltip 取样色 {color.name()}", flush=True)
+            assert saturation(color) <= 60, f"tooltip 漏出彩色：{color.name()}"
+        QToolTip.hideText()
+        window_app.processEvents()
+
+    print("两套样式都能应用，tooltip 无彩色", flush=True)
     return 0
 
 
@@ -1652,7 +1681,7 @@ $env:PYTHONIOENCODING='utf-8'; [Console]::OutputEncoding=[System.Text.Encoding]:
 python -X utf8 "$env:TEMP\opencode\style_switch.py"
 ```
 
-Expected: 打印 `样式列表: [('traditional', '传统框感'), ('flat', '扁平')]` 与两行非零长度，最后 `两套样式都能应用`，退出码 0
+Expected: 打印 `样式列表: [('traditional', '传统框感'), ('flat', '扁平')]`、两行非零长度、每个样式两行 tooltip 取样色（都应是灰阶），最后 `两套样式都能应用，tooltip 无彩色`，退出码 0
 
 - [ ] **Step 5: 追加台账**
 
