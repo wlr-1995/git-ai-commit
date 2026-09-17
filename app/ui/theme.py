@@ -23,9 +23,9 @@ SPACE_XL = 24
 #: 圆角半径。
 RADIUS = 6
 
-#: 主窗口内容边距与区块间距。
-WINDOW_MARGINS = (SPACE_LG, SPACE_MD, SPACE_LG, SPACE_SM)
-LAYOUT_SPACING = SPACE_MD
+#: 主窗口内容边距与区块间距（方向 B：传统 → 更紧凑）。
+WINDOW_MARGINS = (SPACE_MD, SPACE_SM, SPACE_MD, SPACE_XS)
+LAYOUT_SPACING = SPACE_SM
 
 #: 中性色。
 BACKGROUND = "#ffffff"
@@ -74,12 +74,44 @@ FONT_SIZE = 9
 FONT_SIZE_SMALL = 8
 
 #: 表格的行高与边框策略（方向分支会覆盖）。
-TABLE_ROW_HEIGHT = 28
-TABLE_GRID = False
+TABLE_ROW_HEIGHT = 24
+TABLE_GRID = True
 TABLE_ZEBRA = True
 
-#: 方向专属 QSS（表格与面板的视觉世界）。美化分支替换这一段。
-DIRECTION_QSS = ""
+#: 方向专属 QSS。方向 B「传统框感」：保留面板边框与斑马纹，表头填充成条，
+#: 行更矮更密，接近 TortoiseGit「检查修改」那种密集列表。
+DIRECTION_QSS = f"""
+QPlainTextEdit, QTextEdit {{
+    background: {BACKGROUND};
+    border: 1px solid {BORDER_STRONG};
+    border-radius: 4px;
+    padding: {SPACE_XS}px {SPACE_SM}px;
+}}
+QPlainTextEdit:focus, QTextEdit:focus {{ border: 1px solid {ACCENT}; }}
+QTableWidget {{
+    background: {BACKGROUND};
+    alternate-background-color: {ZEBRA};
+    border: 1px solid {BORDER_STRONG};
+    border-radius: 4px;
+    gridline-color: {GRID};
+}}
+QTableWidget::item {{ padding: 0 {SPACE_XS}px; }}
+QTableWidget::item:selected {{ background: {ACCENT_SOFT}; color: {TEXT}; }}
+QHeaderView {{ background: {HEADER_BG}; }}
+QHeaderView::section {{
+    background: {HEADER_BG};
+    border: none;
+    border-right: 1px solid {GRID};
+    border-bottom: 1px solid {BORDER_STRONG};
+    font-weight: 600;
+    padding: {SPACE_XS}px {SPACE_XS}px;
+}}
+QTableCornerButton::section {{
+    background: {HEADER_BG};
+    border: none;
+    border-bottom: 1px solid {BORDER_STRONG};
+}}
+"""
 
 
 def base_font() -> QFont:
