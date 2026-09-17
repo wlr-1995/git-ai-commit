@@ -321,8 +321,12 @@ class MainWindow(QMainWindow):
         self.changes_table.viewport().installEventFilter(self)
 
         self.show_untracked_check = QCheckBox("显示未受版本控制的文件(U)")
-        self.show_untracked_check.setToolTip("关闭后未跟踪文件不显示，也不会被提交")
-        self.show_untracked_check.setChecked(True)
+        self.show_untracked_check.setToolTip(
+            "默认不显示未受版本控制的文件（它们也不会被提交）；勾选后才列出"
+        )
+        self.show_untracked_check.setChecked(
+            bool(self.config.get("ui", {}).get("show_untracked", False))
+        )
         self.show_untracked_check.toggled.connect(lambda _checked: self._render_rows())
         layout.addWidget(self.show_untracked_check)
 
@@ -654,16 +658,16 @@ class MainWindow(QMainWindow):
             self._set_status(f"共 {total} 个变更 · 已选 {selected}")
         self._update_empty_state()
 
+        message = self.message_edit.toPlainText().strip()
         blocked = ""
-        if not total:
-            blocked = ""  # 没有变更时无事可做，不必催促勾选
-        elif not selected:
+        if total and not selected:
             blocked = "请先勾选要提交的文件"
-        elif not self.message_edit.toPlainText().strip():
+        elif total and not message:
             blocked = "请填写提交信息"
         self.action_hint.setText(blocked)
         self.btn_commit.setToolTip(blocked)
-        self.btn_commit.setEnabled(not blocked and not self._busy)
+        # 没得提交（没有可见变更 / 没勾选）或没写提交信息时都不给点。
+        self.btn_commit.setEnabled(bool(selected) and bool(message) and not self._busy)
 
     def _set_all(self, checked: bool) -> None:
         state = Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked

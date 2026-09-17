@@ -15,7 +15,7 @@ DEFAULT_CONFIG: dict = {
         "timeout": 60,
     },
     "git": {"max_diff_lines": 200},
-    "ui": {"window_width": 720, "window_height": 520},
+    "ui": {"window_width": 720, "window_height": 520, "show_untracked": False},
     "selection": {"checked_by_default": "tracked"},
 }
 

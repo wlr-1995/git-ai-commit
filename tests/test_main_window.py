@@ -161,6 +161,7 @@ def test_table_has_expected_columns(qapp, tmp_path, monkeypatch):
 
 def test_changes_loaded_fills_table(qapp, tmp_path, monkeypatch):
     window = _make_window(tmp_path, monkeypatch)
+    window.show_untracked_check.setChecked(True)  # 本用例要检查未跟踪行的列内容
     changes = [
         repo.FileChange(path="a.md", status=repo.MODIFIED),
         repo.FileChange(path="new.txt", status=repo.UNTRACKED),
@@ -182,6 +183,7 @@ def test_changes_loaded_fills_table(qapp, tmp_path, monkeypatch):
 
 def test_default_checks_tracked_not_untracked(qapp, tmp_path, monkeypatch):
     window = _make_window(tmp_path, monkeypatch)
+    window.show_untracked_check.setChecked(True)  # 未跟踪默认不显示，这里要看它的勾选态
     window._on_changes_loaded(
         [
             repo.FileChange(path="a.txt", status=repo.MODIFIED),
@@ -189,7 +191,33 @@ def test_default_checks_tracked_not_untracked(qapp, tmp_path, monkeypatch):
         ]
     )
 
+    assert window.changes_table.rowCount() == 2
     assert window.checked_paths() == ["a.txt"]
+
+
+def test_untracked_hidden_by_default(qapp, tmp_path, monkeypatch):
+    """默认不显示未受版本控制的文件。"""
+    window = _make_window(tmp_path, monkeypatch)
+
+    assert window.show_untracked_check.isChecked() is False
+    window._on_changes_loaded(_changes_fixture())
+
+    assert [window.changes_table.item(row, 0).text() for row in range(3)] == [
+        "a.txt",
+        "gone.txt",
+        "moved.txt",
+    ]
+    assert window.changes_table.rowCount() == 3
+
+
+def test_show_untracked_can_be_enabled_by_config(qapp, tmp_path, monkeypatch):
+    config = copy.deepcopy(DEFAULT_CONFIG)
+    config["ui"]["show_untracked"] = True
+    monkeypatch.setattr(mw.MainWindow, "refresh", lambda self: None)
+    monkeypatch.setattr(mw, "load_config", lambda: config)
+
+    window = mw.MainWindow(str(tmp_path))
+    assert window.show_untracked_check.isChecked() is True
 
 
 def _changes_fixture():
@@ -201,9 +229,15 @@ def _changes_fixture():
     ]
 
 
-def test_filter_all_and_none(qapp, tmp_path, monkeypatch):
-    window = _make_window(tmp_path, monkeypatch)
+def _load_fixture(window):
+    """加载含未跟踪文件的样例；它们默认不显示，所以显式打开开关。"""
+    window.show_untracked_check.setChecked(True)
     window._on_changes_loaded(_changes_fixture())
+    return window
+
+
+def test_filter_all_and_none(qapp, tmp_path, monkeypatch):
+    window = _load_fixture(_make_window(tmp_path, monkeypatch))
 
     window._apply_filter("none")
     assert window.checked_paths() == []
@@ -213,8 +247,7 @@ def test_filter_all_and_none(qapp, tmp_path, monkeypatch):
 
 
 def test_filter_links_are_additive(qapp, tmp_path, monkeypatch):
-    window = _make_window(tmp_path, monkeypatch)
-    window._on_changes_loaded(_changes_fixture())
+    window = _load_fixture(_make_window(tmp_path, monkeypatch))
     # 默认：已跟踪全勾，未跟踪不勾
     assert set(window.checked_paths()) == {"a.txt", "gone.txt", "moved.txt"}
 
@@ -238,7 +271,7 @@ def test_filter_chips_drop_untracked_link(qapp, tmp_path, monkeypatch):
 
 def test_untracked_rows_can_be_hidden(qapp, tmp_path, monkeypatch):
     window = _make_window(tmp_path, monkeypatch)
-    window._on_changes_loaded(_changes_fixture())
+    _load_fixture(window)
     assert window.changes_table.rowCount() == 4
 
     window.show_untracked_check.setChecked(False)
@@ -252,7 +285,7 @@ def test_untracked_rows_can_be_hidden(qapp, tmp_path, monkeypatch):
 
 def test_hiding_untracked_preserves_existing_checks(qapp, tmp_path, monkeypatch):
     window = _make_window(tmp_path, monkeypatch)
-    window._on_changes_loaded(_changes_fixture())
+    _load_fixture(window)
     window._apply_filter("none")
     for _, item in window._table_rows():
         if item.text() == "gone.txt":
@@ -361,7 +394,7 @@ def test_header_shows_repo_name_and_branch_chip(qapp, tmp_path, monkeypatch):
 
 def test_status_counts_selected(qapp, tmp_path, monkeypatch):
     window = _make_window(tmp_path, monkeypatch)
-    window._on_changes_loaded(_changes_fixture())
+    _load_fixture(window)
 
     assert "共 4 个变更" in window.status.text()
     assert "已选 3" in window.status.text()
@@ -372,7 +405,7 @@ def test_status_counts_selected(qapp, tmp_path, monkeypatch):
 
 def test_commit_needs_selection_and_message(qapp, tmp_path, monkeypatch):
     window = _make_window(tmp_path, monkeypatch)
-    window._on_changes_loaded(_changes_fixture())
+    _load_fixture(window)
 
     assert window.btn_commit.isEnabled() is False
     assert window.btn_commit.toolTip() == "请填写提交信息"
@@ -392,10 +425,11 @@ def test_empty_state_explains_clean_and_filtered(qapp, tmp_path, monkeypatch):
     window._on_changes_loaded([])
     assert not window.empty_state.isHidden()
     assert "工作区干净" in window.empty_state.text()
-    # 没有变更时不催促勾选
+    # 没有变更时不催促勾选，也不给点提交
     assert window.action_hint.text() == ""
+    assert window.btn_commit.isEnabled() is False
 
-    window._on_changes_loaded(_changes_fixture())
+    _load_fixture(window)
     assert window.empty_state.isHidden()
 
     window.show_untracked_check.setChecked(False)
@@ -406,6 +440,7 @@ def test_empty_state_explains_clean_and_filtered(qapp, tmp_path, monkeypatch):
 
 def test_numeric_columns_right_aligned_and_status_monochrome(qapp, tmp_path, monkeypatch):
     window = _make_window(tmp_path, monkeypatch)
+    window.show_untracked_check.setChecked(True)
     window._on_changes_loaded(_changes_fixture(), {"a.txt": (2, 1)})
     table = window.changes_table
 
@@ -421,7 +456,7 @@ def test_numeric_columns_right_aligned_and_status_monochrome(qapp, tmp_path, mon
 
 def test_busy_disables_commit_and_keeps_start_text(qapp, tmp_path, monkeypatch):
     window = _make_window(tmp_path, monkeypatch)
-    window._on_changes_loaded(_changes_fixture())
+    _load_fixture(window)
     window.message_edit.setPlainText("feat: x")
     assert window.btn_commit.isEnabled() is True
 
@@ -442,7 +477,7 @@ def test_indicator_box_is_wide_enough_to_hit(qapp, tmp_path, monkeypatch):
     2) 快速连点第二次按下带 DoubleClick 标记，会被 Qt 整个丢掉。
     """
     window = _make_window(tmp_path, monkeypatch)
-    window._on_changes_loaded(_changes_fixture())
+    _load_fixture(window)
     window.show()
     qapp.processEvents()
 
@@ -468,7 +503,7 @@ def test_indicator_box_is_wide_enough_to_hit(qapp, tmp_path, monkeypatch):
 def test_click_just_outside_indicator_still_toggles(qapp, tmp_path, monkeypatch):
     """点在勾选框外侧几个像素（差一点点没点准）也必须算数。"""
     window = _make_window(tmp_path, monkeypatch)
-    window._on_changes_loaded(_changes_fixture())
+    _load_fixture(window)
     window.show()
     qapp.processEvents()
 
@@ -491,7 +526,7 @@ def test_double_click_press_alone_toggles(qapp, tmp_path, monkeypatch):
     会被整个丢掉（releaseFromDoubleClick），于是快速连点第二次像「没反应」。
     """
     window = _make_window(tmp_path, monkeypatch)
-    window._on_changes_loaded(_changes_fixture())
+    _load_fixture(window)
     window.show()
     qapp.processEvents()
 
@@ -526,7 +561,7 @@ def test_fast_double_click_counts_as_two_clicks(qapp, tmp_path, monkeypatch):
     所以从「未勾选」出发应当勾上再取消，正好回到未勾选。
     """
     window = _make_window(tmp_path, monkeypatch)
-    window._on_changes_loaded(_changes_fixture())
+    _load_fixture(window)
     window.show()
     qapp.processEvents()
 
@@ -555,7 +590,7 @@ def test_fast_double_click_counts_as_two_clicks(qapp, tmp_path, monkeypatch):
 def test_click_on_path_text_does_not_toggle(qapp, tmp_path, monkeypatch):
     """点路径文字只能选中行，不能顺手改勾选（避免误提交/漏提交）。"""
     window = _make_window(tmp_path, monkeypatch)
-    window._on_changes_loaded(_changes_fixture())
+    _load_fixture(window)
     window.show()
     qapp.processEvents()
 
@@ -579,7 +614,7 @@ def test_press_toggles_immediately_and_release_does_not_repeat(qapp, tmp_path, m
     from PySide6.QtCore import QEvent
 
     window = _make_window(tmp_path, monkeypatch)
-    window._on_changes_loaded(_changes_fixture())
+    _load_fixture(window)
     window.show()
     qapp.processEvents()
 
@@ -613,7 +648,7 @@ def test_checkbox_press_selects_row_and_focuses_table(qapp, tmp_path, monkeypatc
     from PySide6.QtCore import QEvent
 
     window = _make_window(tmp_path, monkeypatch)
-    window._on_changes_loaded(_changes_fixture())
+    _load_fixture(window)
     window.show()
     qapp.processEvents()
 
