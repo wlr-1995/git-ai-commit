@@ -1654,7 +1654,9 @@ python -X utf8 "$env:TEMP\opencode\style_switch.py"
 
 Expected: 打印 `样式列表: [('traditional', '传统框感'), ('flat', '扁平')]` 与两行非零长度，最后 `两套样式都能应用`，退出码 0
 
-- [ ] **Step 5: 追加台账并提交**
+- [ ] **Step 5: 追加台账**
+
+`.superpowers/` 整个目录是 gitignore 的临时区（`.superpowers/.gitignore` 里是 `*`），**不要提交**（`git add -A` 会把它排除掉，强行提交只会得到空提交）。直接追加即可。
 
 在 `.superpowers/sdd/progress.md` 末尾追加：
 
@@ -1667,10 +1669,7 @@ CHANGE (spec 2026-09-17-styles-as-files): 样式从 Python f-string 外置为 ap
 - 验收：四状态截图与改动前逐像素比对仅剩上述 5 处差异；真机冒烟无 stderr 无残留进程。
 ```
 
-```powershell
-git add -A
-git commit -m "docs: record styles-as-files migration in progress ledger"
-```
+追加完即可，本步骤不产生提交（台账是临时区）。
 
 ---
 
