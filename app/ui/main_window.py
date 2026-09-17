@@ -8,6 +8,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QCheckBox,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -106,12 +107,11 @@ def _error_summary(message: str) -> str:
 #: 变更表格的列（首列内含勾选框与路径，与 TortoiseGit 的「检查修改」一致）。
 _TABLE_COLUMNS = ("路径", "扩展名", "状态", "添加行数", "删除行数")
 
-#: 「选中：」过滤链接行。
+#: 「选中：」过滤链接行。已添加/已删除/已修改为「累加勾选」，不会取消其它勾选。
 _FILTER_HTML = (
     "选中： "
     '<a href="all">全部(A)</a> '
     '<a href="none">无(N)</a> '
-    '<a href="untracked">未版本控制</a> '
     '<a href="added">已添加</a> '
     '<a href="deleted">已删除</a> '
     '<a href="modified">已修改</a>'
@@ -132,6 +132,7 @@ class MainWindow(QMainWindow):
         self._operation: str | None = None
         self._pending_refresh = False
         self._changes: list[repo.FileChange] = []
+        self._stats: dict = {}
 
         self.setWindowTitle("AI 提交")
         size = self.config.get("ui", {})
@@ -171,10 +172,19 @@ class MainWindow(QMainWindow):
         self.changes_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.changes_table.setAlternatingRowColors(True)
         table_header = self.changes_table.horizontalHeader()
-        table_header.setSectionResizeMode(0, QHeaderView.Stretch)
+        # 列尽量靠左排布：路径列用固定初始宽度，其余按内容收紧，右侧留白。
+        table_header.setStretchLastSection(False)
+        table_header.setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        table_header.setSectionResizeMode(0, QHeaderView.Interactive)
+        self.changes_table.setColumnWidth(0, 340)
         for column in range(1, len(_TABLE_COLUMNS)):
             table_header.setSectionResizeMode(column, QHeaderView.ResizeToContents)
         layout.addWidget(self.changes_table, 3)
+
+        self.show_untracked_check = QCheckBox("显示未受版本控制的文件(U)")
+        self.show_untracked_check.setChecked(True)
+        self.show_untracked_check.toggled.connect(lambda _checked: self._render_rows())
+        layout.addWidget(self.show_untracked_check)
 
         actions = QHBoxLayout()
         self.btn_generate = QPushButton("AI 生成")
@@ -205,6 +215,9 @@ class MainWindow(QMainWindow):
             shortcut = QShortcut(QKeySequence(key), self.changes_table)
             shortcut.setContext(Qt.WidgetShortcut)
             shortcut.activated.connect(lambda name=kind: self._apply_filter(name))
+        toggle_untracked = QShortcut(QKeySequence("U"), self.changes_table)
+        toggle_untracked.setContext(Qt.WidgetShortcut)
+        toggle_untracked.activated.connect(self.show_untracked_check.toggle)
 
     # --- 数据 ---
 
@@ -235,28 +248,47 @@ class MainWindow(QMainWindow):
 
     def _on_changes_loaded(self, changes, stats=None) -> None:
         self._changes = list(changes)
-        stats = stats or {}
+        self._stats = dict(stats or {})
+        # 全新加载：清空旧行，勾选状态按默认策略重来。
+        self.changes_table.setRowCount(0)
+        self._render_rows()
+
+    def _render_rows(self) -> None:
+        """按当前「显示未受版本控制的文件」开关渲染表格，保留已存在的勾选状态。"""
+        previous: dict[str, object] = {}
+        for _, item in self._table_rows():
+            change = item.data(Qt.UserRole)
+            if change is not None:
+                previous[change.path] = item.checkState()
+
         checked_default = self.config.get("selection", {}).get("checked_by_default", "tracked")
+        show_untracked = self.show_untracked_check.isChecked()
+        visible = [
+            change
+            for change in self._changes
+            if show_untracked or change.status != repo.UNTRACKED
+        ]
 
         self.changes_table.setRowCount(0)
-        for change in self._changes:
+        for change in visible:
             row = self.changes_table.rowCount()
             self.changes_table.insertRow(row)
 
             path_item = QTableWidgetItem(change.path)
             path_item.setData(Qt.UserRole, change)
-            if checked_default == "all":
-                path_item.setCheckState(Qt.Checked)
-            elif checked_default == "none":
-                path_item.setCheckState(Qt.Unchecked)
-            else:
-                path_item.setCheckState(
-                    Qt.Unchecked if change.status == repo.UNTRACKED else Qt.Checked
-                )
+            state = previous.get(change.path)
+            if state is None:
+                if checked_default == "all":
+                    state = Qt.Checked
+                elif checked_default == "none":
+                    state = Qt.Unchecked
+                else:
+                    state = Qt.Unchecked if change.status == repo.UNTRACKED else Qt.Checked
+            path_item.setCheckState(state)
             self.changes_table.setItem(row, 0, path_item)
 
-            added, deleted = stats.get(change.path, (None, None)) if change.path in stats else (None, None)
-            has_stat = change.path in stats
+            has_stat = change.path in self._stats
+            added, deleted = self._stats.get(change.path, (None, None))
             cells = [
                 Path(change.path).suffix,
                 repo.STATUS_TEXT.get(change.status, change.status),
@@ -266,13 +298,14 @@ class MainWindow(QMainWindow):
             for offset, text in enumerate(cells, start=1):
                 self.changes_table.setItem(row, offset, QTableWidgetItem(text))
 
-        self.status.setText(f"共 {len(self._changes)} 个变更")
-        self.btn_commit.setEnabled(bool(self._changes))
-        if not self._changes:
+        self.status.setText(f"共 {len(visible)} 个变更")
+        self.btn_commit.setEnabled(bool(visible))
+        if not visible:
             self.message_edit.setPlainText("")
 
     def _on_refresh_failed(self, message: str) -> None:
         self._changes = []
+        self._stats = {}
         self.changes_table.setRowCount(0)
         self.btn_commit.setEnabled(False)
         self._error(f"读取变更失败：{message}")
@@ -309,7 +342,11 @@ class MainWindow(QMainWindow):
             item.setCheckState(state)
 
     def _apply_filter(self, kind: str) -> None:
-        """「选中：」链接：按状态批量勾选。"""
+        """「选中：」链接。
+
+        全部/无 直接全勾/全不勾；已添加/已删除/已修改 只做「累加勾选」，
+        不会取消其它已勾选项。
+        """
         if kind == "all":
             self._set_all(True)
             return
@@ -317,15 +354,16 @@ class MainWindow(QMainWindow):
             self._set_all(False)
             return
         wanted = {
-            "untracked": {repo.UNTRACKED},
             "added": {repo.ADDED},
             "deleted": {repo.DELETED},
             "modified": {repo.MODIFIED, repo.RENAMED},
         }.get(kind, set())
+        if not wanted:
+            return
         for _, item in self._table_rows():
             change = item.data(Qt.UserRole)
-            status = change.status if change is not None else None
-            item.setCheckState(Qt.Checked if status in wanted else Qt.Unchecked)
+            if change is not None and change.status in wanted:
+                item.setCheckState(Qt.Checked)
 
     # --- 动作 ---
 

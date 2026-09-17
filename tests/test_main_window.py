@@ -10,6 +10,7 @@ pytest.importorskip("PySide6")
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PySide6.QtCore import Qt  # noqa: E402
 from PySide6.QtGui import QCloseEvent, QKeySequence, QShortcut  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
@@ -135,30 +136,75 @@ def test_default_checks_tracked_not_untracked(qapp, tmp_path, monkeypatch):
     assert window.checked_paths() == ["a.txt"]
 
 
-def test_filter_links_check_matching_statuses(qapp, tmp_path, monkeypatch):
+def _changes_fixture():
+    return [
+        repo.FileChange(path="a.txt", status=repo.MODIFIED),
+        repo.FileChange(path="new.txt", status=repo.UNTRACKED),
+        repo.FileChange(path="gone.txt", status=repo.DELETED),
+        repo.FileChange(path="moved.txt", status=repo.RENAMED, orig_path="old.txt"),
+    ]
+
+
+def test_filter_all_and_none(qapp, tmp_path, monkeypatch):
     window = _make_window(tmp_path, monkeypatch)
-    window._on_changes_loaded(
-        [
-            repo.FileChange(path="a.txt", status=repo.MODIFIED),
-            repo.FileChange(path="new.txt", status=repo.UNTRACKED),
-            repo.FileChange(path="gone.txt", status=repo.DELETED),
-            repo.FileChange(path="moved.txt", status=repo.RENAMED, orig_path="old.txt"),
-        ]
-        + [],
-        {},
-    )
-
-    window._apply_filter("untracked")
-    assert window.checked_paths() == ["new.txt"]
-
-    window._apply_filter("modified")
-    assert set(window.checked_paths()) == {"a.txt", "moved.txt"}
+    window._on_changes_loaded(_changes_fixture())
 
     window._apply_filter("none")
     assert window.checked_paths() == []
 
     window._apply_filter("all")
     assert len(window.checked_paths()) == 4
+
+
+def test_filter_links_are_additive(qapp, tmp_path, monkeypatch):
+    window = _make_window(tmp_path, monkeypatch)
+    window._on_changes_loaded(_changes_fixture())
+    # 默认：已跟踪全勾，未跟踪不勾
+    assert set(window.checked_paths()) == {"a.txt", "gone.txt", "moved.txt"}
+
+    # 已删除 / 已修改 / 已添加：只加勾，绝不取消已有勾选
+    window._apply_filter("deleted")
+    assert set(window.checked_paths()) == {"a.txt", "gone.txt", "moved.txt"}
+
+    window._apply_filter("none")
+    window._apply_filter("added")
+    assert window.checked_paths() == []
+
+
+def test_filter_html_drops_untracked_link(qapp, tmp_path, monkeypatch):
+    window = _make_window(tmp_path, monkeypatch)
+    html = window.filter_label.text()
+
+    assert "untracked" not in html
+    assert "未版本控制" not in html
+    assert "已添加" in html and "已删除" in html and "已修改" in html
+
+
+def test_untracked_rows_can_be_hidden(qapp, tmp_path, monkeypatch):
+    window = _make_window(tmp_path, monkeypatch)
+    window._on_changes_loaded(_changes_fixture())
+    assert window.changes_table.rowCount() == 4
+
+    window.show_untracked_check.setChecked(False)
+
+    assert window.changes_table.rowCount() == 3
+    assert "new.txt" not in window.checked_paths()
+
+    window.show_untracked_check.setChecked(True)
+    assert window.changes_table.rowCount() == 4
+
+
+def test_hiding_untracked_preserves_existing_checks(qapp, tmp_path, monkeypatch):
+    window = _make_window(tmp_path, monkeypatch)
+    window._on_changes_loaded(_changes_fixture())
+    window._apply_filter("none")
+    for _, item in window._table_rows():
+        if item.text() == "gone.txt":
+            item.setCheckState(Qt.Checked)
+
+    window.show_untracked_check.setChecked(False)
+
+    assert window.checked_paths() == ["gone.txt"]
 
 
 def test_f5_shortcut_triggers_refresh(qapp, tmp_path, monkeypatch):
