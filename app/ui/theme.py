@@ -1,24 +1,34 @@
-"""白色主题：设计令牌、字体、调色板与 QSS。
+"""白色主题：QSS 从样式文件读取，这里只放 QSS 管不了的东西与装载器。
 
-- Windows 11 的默认样式会跟随系统深色模式；这里固定 Fusion + 浅色调色板，
-  保证界面始终是白色主题。
-- 间距只使用 :data:`SPACE_*` 刻度，圆角只用 :data:`RADIUS`，颜色只用本模块的令牌，
-  避免界面各处出现一次性数值。
-- 方向专属的样式（表格与面板的视觉世界）放在 :data:`DIRECTION_QSS`，
-  美化分支只替换这一段即可。
+- 样式是真实文件：``app/ui/styles/*.qss``，一份文件一套样式，目录扫描即可发现。
+- 样式文件里写**字面值**（``#1f1f1f``、``8px``），``url("...")`` 用相对本文件的路径。
+- Windows 11 默认样式会跟随系统深色模式；这里固定 Fusion，保证界面始终是白底。
 """
 
+import re
 from pathlib import Path
 
 from PySide6.QtCore import QRect, Qt
 from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPalette, QPixmap
 
-#: 勾选标记（QSS 只能引用文件，不能内嵌图形）。
-CHECK_ICON = (Path(__file__).resolve().parent / "icons" / "check.svg").as_posix()
+# --- 样式文件 ----------------------------------------------------------------
+
+UI_DIR = Path(__file__).resolve().parent
+STYLES_DIR = UI_DIR / "styles"
+ICONS_DIR = STYLES_DIR / "icons"
+
+#: 默认样式（文件缺失或样式名未知时回退到它）。
+DEFAULT_STYLE = "traditional"
+
+#: 勾选标记（QSS 只能引用文件，不能内嵌图形；测试用它确认引用真实存在）。
+CHECK_ICON = (ICONS_DIR / "check.svg").as_posix()
+
+_URL_RE = re.compile(r'url\(\s*"([^"]+)"\s*\)')
+_LABEL_RE = re.compile(r"^\s*/\*\s*名称\s*[:：]\s*(.+?)\s*\*/")
 
 # --- 设计令牌 ----------------------------------------------------------------
 
-#: 间距刻度，全部为 4 的倍数。
+#: 间距刻度，全部为 4 的倍数（Qt 布局 API 只认数字，QSS 管不到布局）。
 SPACE_XS = 4
 SPACE_SM = 8
 SPACE_MD = 12
@@ -75,45 +85,77 @@ FONT_FAMILIES = ("Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI")
 FONT_SIZE = 9
 FONT_SIZE_SMALL = 8
 
-#: 表格的行高与边框策略（方向分支会覆盖）。
+#: 表格的行高与边框策略（样式文件里以 QSS 表达；这里供 Qt API 使用）。
 TABLE_ROW_HEIGHT = 24
 TABLE_GRID = True
 TABLE_ZEBRA = True
 
-#: 方向专属 QSS。方向 B「传统框感」：保留面板边框与斑马纹，表头填充成条，
-#: 行更矮更密，接近 TortoiseGit「检查修改」那种密集列表。
-DIRECTION_QSS = f"""
-QPlainTextEdit, QTextEdit {{
-    background: {BACKGROUND};
-    border: 1px solid {BORDER_STRONG};
-    border-radius: 4px;
-    padding: {SPACE_XS}px {SPACE_SM}px;
-}}
-QPlainTextEdit:focus, QTextEdit:focus {{ border: 1px solid {INK}; }}
-QTableWidget {{
-    background: {BACKGROUND};
-    alternate-background-color: {ZEBRA};
-    border: 1px solid {BORDER_STRONG};
-    border-radius: 4px;
-    gridline-color: {GRID};
-}}
-QTableWidget::item {{ padding: 0 {SPACE_XS}px; }}
-QTableWidget::item:selected {{ background: {INK_SOFT}; color: {TEXT}; }}
-QHeaderView {{ background: {HEADER_BG}; }}
-QHeaderView::section {{
-    background: {HEADER_BG};
-    border: none;
-    border-right: 1px solid {GRID};
-    border-bottom: 1px solid {BORDER_STRONG};
-    font-weight: 600;
-    padding: {SPACE_XS}px {SPACE_XS}px;
-}}
-QTableCornerButton::section {{
-    background: {HEADER_BG};
-    border: none;
-    border-bottom: 1px solid {BORDER_STRONG};
-}}
-"""
+
+# --- 样式装载 ----------------------------------------------------------------
+
+
+def style_path(style: str) -> Path:
+    """样式 key 对应的文件路径。"""
+    return STYLES_DIR / f"{style}.qss"
+
+
+def style_label(path: Path) -> str:
+    """显示名：取首行注释里的 ``/* 名称: xxx */``，没有就用文件名。"""
+    try:
+        first_line = path.read_text(encoding="utf-8").splitlines()[0]
+    except (OSError, UnicodeDecodeError, IndexError):
+        return path.stem
+    match = _LABEL_RE.match(first_line)
+    return match.group(1) if match else path.stem
+
+
+def available_styles() -> list[tuple[str, str]]:
+    """[(样式 key, 显示名)]：默认样式排最前，其余按文件名排序。
+
+    以 ``_`` 或 ``.`` 开头的文件不列出（留给共享片段与编辑器临时文件）。
+    """
+    if not STYLES_DIR.is_dir():
+        return []
+    keys = [
+        path.stem
+        for path in STYLES_DIR.glob("*.qss")
+        if not path.name.startswith(("_", "."))
+    ]
+    keys.sort(key=lambda key: (key != DEFAULT_STYLE, key))
+    return [(key, style_label(style_path(key))) for key in keys]
+
+
+def _resolve_urls(text: str, base: Path) -> str:
+    """把 ``url("相对路径")`` 解析成绝对路径（Qt 不按样式表所在目录解析）。"""
+
+    def replace(match: re.Match) -> str:
+        target = Path(match.group(1))
+        if target.is_absolute():
+            return match.group(0)
+        return f'url("{(base / target).as_posix()}")'
+
+    return _URL_RE.sub(replace, text)
+
+
+def load_stylesheet(style: str | None = None) -> str:
+    """读取样式文件；未知样式或读不出来则回退默认样式，再不行返回空样式表。"""
+    for key in (style or DEFAULT_STYLE, DEFAULT_STYLE):
+        path = style_path(key)
+        if not path.is_file():
+            continue
+        try:
+            return _resolve_urls(path.read_text(encoding="utf-8"), path.parent)
+        except (OSError, UnicodeDecodeError):
+            continue
+    return ""
+
+
+def apply_style(app, style: str) -> None:
+    """把一套样式应用到整个应用。"""
+    app.setStyleSheet(load_stylesheet(style))
+
+
+# --- QSS 管不了的部分 --------------------------------------------------------
 
 
 def base_font() -> QFont:
@@ -197,145 +239,10 @@ def app_icon() -> QIcon:
     return QIcon(pixmap)
 
 
-BASE_QSS = f"""
-QWidget {{
-    color: {TEXT};
-}}
-QPlainTextEdit, QTextEdit, QLineEdit {{
-    background: {BACKGROUND};
-    border: 1px solid {BORDER};
-    border-radius: {RADIUS}px;
-    padding: {SPACE_SM}px;
-    selection-background-color: {INK_SOFT};
-    selection-color: {TEXT};
-}}
-QPlainTextEdit:focus, QTextEdit:focus, QLineEdit:focus {{
-    border: 1px solid {INK};
-}}
-QPushButton {{
-    background: {SURFACE};
-    border: 1px solid {BORDER_STRONG};
-    border-radius: {RADIUS}px;
-    padding: 6px 16px;
-}}
-QPushButton:hover {{ background: {SURFACE_HOVER}; }}
-QPushButton:pressed {{ background: {SURFACE_PRESSED}; }}
-QPushButton:focus {{ border: 1px solid {INK}; }}
-QPushButton:disabled {{
-    background: {SURFACE_DISABLED};
-    border-color: {GRID};
-    color: {TEXT_DISABLED};
-}}
-QPushButton#primaryButton {{
-    background: {INK};
-    border: 1px solid {INK};
-    color: {TEXT_INVERSE};
-    font-weight: 600;
-}}
-QPushButton#primaryButton:hover {{ background: {INK_HOVER}; border-color: {INK_HOVER}; }}
-QPushButton#primaryButton:pressed {{ background: {INK_PRESSED}; }}
-QPushButton#primaryButton:disabled {{
-    background: {SURFACE_PRESSED};
-    border-color: {BORDER};
-    color: {TEXT_DISABLED};
-}}
-QPushButton#chip {{
-    background: transparent;
-    border: 1px solid transparent;
-    border-radius: 10px;
-    padding: 2px 10px;
-    color: {INK};
-}}
-QPushButton#chip:hover {{
-    background: {INK_SOFT};
-    border-color: {INK_SOFT_BORDER};
-}}
-QPushButton#chip:pressed {{ background: {INK_SOFT_BORDER}; }}
-QLabel#repoName {{
-    font-weight: 600;
-    font-size: 11pt;
-}}
-QLabel#repoPath {{
-    color: {TEXT_MUTED};
-    font-size: {FONT_SIZE_SMALL}pt;
-}}
-QLabel#branchChip {{
-    background: {INK_SOFT};
-    border: 1px solid {INK_SOFT_BORDER};
-    border-radius: 9px;
-    color: {INK_PRESSED};
-    font-size: {FONT_SIZE_SMALL}pt;
-    padding: 1px 10px;
-}}
-QLabel#sectionLabel {{
-    font-weight: 600;
-}}
-QLabel#hintLabel {{
-    color: {TEXT_MUTED};
-    font-size: {FONT_SIZE_SMALL}pt;
-}}
-QLabel#emptyState {{
-    color: {TEXT_MUTED};
-    font-size: 10pt;
-}}
-QLabel#statusLabel {{
-    color: {TEXT_MUTED};
-    border-top: 1px solid {GRID};
-    padding-top: {SPACE_SM}px;
-}}
-QCheckBox {{ spacing: {SPACE_SM}px; }}
-/* Fusion 自绘的勾选框在白底上几乎看不见，这里显式画：白底 + 明确边框，
-   勾选后填充近黑并叠白色对勾，保证在任何行底色上都清晰。 */
-QCheckBox::indicator, QTableView::indicator {{
-    width: 15px;
-    height: 15px;
-    border: 1px solid {TEXT_MUTED};
-    border-radius: 3px;
-    background: {BACKGROUND};
-}}
-QCheckBox::indicator:hover, QTableView::indicator:hover {{
-    border: 1px solid {INK};
-    background: {SURFACE_PRESSED};
-}}
-QCheckBox::indicator:checked, QTableView::indicator:checked {{
-    background: {INK};
-    border: 1px solid {INK};
-    image: url("{CHECK_ICON}");
-}}
-QCheckBox::indicator:checked:hover, QTableView::indicator:checked:hover {{
-    background: {INK_HOVER};
-    border: 1px solid {INK_HOVER};
-}}
-QScrollBar:vertical {{ background: transparent; width: 12px; margin: 0; }}
-QScrollBar::handle:vertical {{
-    background: {BORDER};
-    border-radius: 6px;
-    min-height: 28px;
-}}
-QScrollBar::handle:vertical:hover {{ background: {BORDER_STRONG}; }}
-QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
-QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: transparent; }}
-QScrollBar:horizontal {{ background: transparent; height: 12px; margin: 0; }}
-QScrollBar::handle:horizontal {{
-    background: {BORDER};
-    border-radius: 6px;
-    min-width: 28px;
-}}
-QScrollBar::handle:horizontal:hover {{ background: {BORDER_STRONG}; }}
-QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{ width: 0; }}
-QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {{ background: transparent; }}
-"""
-
-
-def stylesheet() -> str:
-    """基础 QSS + 方向专属 QSS。"""
-    return BASE_QSS + DIRECTION_QSS
-
-
-def apply_light_theme(app) -> None:
+def apply_light_theme(app, style: str = DEFAULT_STYLE) -> None:
     """把应用固定为白色主题（在 QApplication 创建后立即调用）。"""
     app.setStyle("Fusion")
     app.setFont(base_font())
     app.setPalette(light_palette())
-    app.setStyleSheet(stylesheet())
+    apply_style(app, style)
     app.setWindowIcon(app_icon())

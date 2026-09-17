@@ -1,0 +1,185 @@
+/* 名称: 传统框感 */
+/*
+ * 黑白单色：所有色值必须是灰阶（r == g == b）。
+ * url() 相对本文件所在目录解析；改样式只改这个文件，不用碰 Python。
+ */
+
+* {
+    font-family: "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI";
+    font-size: 9pt;
+}
+QWidget { color: #1f1f1f; }
+
+/* 表面底色（原先由调色板承担） */
+QMainWindow, QDialog, QStatusBar, QMenu, QMessageBox { background: #ffffff; }
+QToolTip {
+    background: #ffffff;
+    color: #1f1f1f;
+    border: 1px solid #c4c4c4;
+}
+
+/* 输入 */
+QLineEdit {
+    background: #ffffff;
+    border: 1px solid #d9d9d9;
+    border-radius: 6px;
+    padding: 8px;
+    selection-background-color: #ededed;
+    selection-color: #1f1f1f;
+}
+QPlainTextEdit, QTextEdit {
+    background: #ffffff;
+    border: 1px solid #c4c4c4;
+    border-radius: 4px;
+    padding: 4px 8px;
+    selection-background-color: #ededed;
+    selection-color: #1f1f1f;
+}
+QLineEdit:focus { border: 1px solid #1f1f1f; }
+QPlainTextEdit:focus, QTextEdit:focus { border: 1px solid #1f1f1f; }
+
+/* 按钮 */
+QPushButton {
+    background: #f6f6f6;
+    border: 1px solid #c4c4c4;
+    border-radius: 6px;
+    padding: 6px 16px;
+}
+QPushButton:hover { background: #eeeeee; }
+QPushButton:pressed { background: #e3e3e3; }
+QPushButton:focus { border: 1px solid #1f1f1f; }
+QPushButton:disabled {
+    background: #fafafa;
+    border-color: #e6e6e6;
+    color: #9e9e9e;
+}
+QPushButton#primaryButton {
+    background: #1f1f1f;
+    border: 1px solid #1f1f1f;
+    color: #ffffff;
+    font-weight: 600;
+}
+QPushButton#primaryButton:hover { background: #000000; border-color: #000000; }
+QPushButton#primaryButton:pressed { background: #000000; }
+QPushButton#primaryButton:disabled {
+    background: #e3e3e3;
+    border-color: #d9d9d9;
+    color: #9e9e9e;
+}
+QPushButton#chip {
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 10px;
+    padding: 2px 10px;
+    color: #1f1f1f;
+}
+QPushButton#chip:hover { background: #ededed; border-color: #d9d9d9; }
+QPushButton#chip:pressed { background: #d9d9d9; }
+
+/* 标签 */
+QLabel#repoName { font-weight: 600; font-size: 11pt; }
+QLabel#repoPath { color: #6b6b6b; font-size: 8pt; }
+QLabel#branchChip {
+    background: #ededed;
+    border: 1px solid #d9d9d9;
+    border-radius: 9px;
+    color: #000000;
+    font-size: 8pt;
+    padding: 1px 10px;
+}
+QLabel#sectionLabel { font-weight: 600; }
+QLabel#hintLabel { color: #6b6b6b; font-size: 8pt; }
+QLabel#emptyState { color: #6b6b6b; font-size: 10pt; }
+QLabel#statusLabel {
+    color: #6b6b6b;
+    border-top: 1px solid #e6e6e6;
+    padding-top: 8px;
+}
+
+/* 勾选框：白底 + 明确描边，勾选后近黑填充叠白色对勾（对勾是 SVG 文件） */
+QCheckBox { spacing: 8px; }
+QCheckBox::indicator, QTableView::indicator {
+    width: 15px;
+    height: 15px;
+    border: 1px solid #6b6b6b;
+    border-radius: 3px;
+    background: #ffffff;
+}
+QCheckBox::indicator:hover, QTableView::indicator:hover {
+    border: 1px solid #1f1f1f;
+    background: #e3e3e3;
+}
+QCheckBox::indicator:checked, QTableView::indicator:checked {
+    background: #1f1f1f;
+    border: 1px solid #1f1f1f;
+    image: url("icons/check.svg");
+}
+QCheckBox::indicator:checked:hover, QTableView::indicator:checked:hover {
+    background: #000000;
+    border: 1px solid #000000;
+}
+
+/* 表格：传统框感——面板边框 + 斑马纹，表头填充成条，行高 24 */
+QTableWidget, QTableView {
+    background: #ffffff;
+    alternate-background-color: #f7f7f7;
+    border: 1px solid #c4c4c4;
+    border-radius: 4px;
+    gridline-color: #e6e6e6;
+}
+QTableWidget::item { padding: 0 4px; }
+QTableWidget::item:selected { background: #ededed; color: #1f1f1f; }
+QHeaderView { background: #f2f2f2; }
+QHeaderView#verticalHeader { qproperty-defaultSectionSize: 24; }
+QHeaderView::section {
+    background: #f2f2f2;
+    border: none;
+    border-right: 1px solid #e6e6e6;
+    border-bottom: 1px solid #c4c4c4;
+    font-weight: 600;
+    padding: 4px 4px;
+}
+QTableCornerButton::section {
+    background: #f2f2f2;
+    border: none;
+    border-bottom: 1px solid #c4c4c4;
+}
+
+/* 下拉框 / 数字框（设置界面用）。弹窗选中色必须显式指定，
+   否则删掉调色板后会漏出 Fusion 的蓝色高亮。 */
+QComboBox, QAbstractSpinBox, QSpinBox {
+    background: #ffffff;
+    border: 1px solid #d9d9d9;
+    border-radius: 6px;
+    padding: 4px 8px;
+    selection-background-color: #ededed;
+    selection-color: #1f1f1f;
+}
+QComboBox:focus, QAbstractSpinBox:focus, QSpinBox:focus { border: 1px solid #1f1f1f; }
+QComboBox:disabled, QAbstractSpinBox:disabled, QSpinBox:disabled {
+    background: #fafafa;
+    border-color: #e6e6e6;
+    color: #9e9e9e;
+}
+QComboBox::drop-down { border: none; width: 18px; }
+QComboBox QAbstractItemView {
+    background: #ffffff;
+    border: 1px solid #c4c4c4;
+    selection-background-color: #ededed;
+    selection-color: #1f1f1f;
+    outline: none;
+}
+QAbstractItemView { selection-background-color: #ededed; selection-color: #1f1f1f; }
+QMenu::item:selected { background: #ededed; color: #1f1f1f; }
+
+/* 滚动条 */
+QScrollBar:vertical { background: transparent; width: 12px; margin: 0; }
+QScrollBar::handle:vertical { background: #d9d9d9; border-radius: 6px; min-height: 28px; }
+QScrollBar::handle:vertical:hover { background: #c4c4c4; }
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; }
+QScrollBar:horizontal { background: transparent; height: 12px; margin: 0; }
+QScrollBar::handle:horizontal { background: #d9d9d9; border-radius: 6px; min-width: 28px; }
+QScrollBar::handle:horizontal:hover { background: #c4c4c4; }
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; }
+QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal { background: transparent; }
