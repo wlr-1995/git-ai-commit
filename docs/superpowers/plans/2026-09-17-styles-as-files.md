@@ -1521,6 +1521,8 @@ Expected: 打印 4 行摘要，输出到 `%TEMP%\parity-after\`。
 import sys
 from pathlib import Path
 
+sys.path.insert(0, r"D:\wlr\ai\git-ai-commit")
+
 import app  # noqa: F401  (side effect: Windows DLL 目录)
 from PySide6.QtGui import QImage
 
@@ -1575,13 +1577,13 @@ Run:
 python -X utf8 "$env:TEMP\opencode\parity.py" "$env:TEMP\parity-before" "$env:TEMP\parity-after"
 ```
 
-Expected（逐张判定，不要只看总数）：
+Expected（逐张判定，不要只看总数）：`shot.py` 每次用 `mkdtemp` 造仓库，**标题里的仓库名与路径文字必然不同**（y 0..59、x 90..420 一带），这部分文字差异不算回归；判定时只看这段区域之外的差异。
 
 | 截图 | 期望 |
 |---|---|
-| `empty`（干净仓库空状态） | **0 差异**（空状态与状态栏文字都没动过） |
-| `unchecked` | 差异只出现在扩展名列与两个数字列的灰字像素上（这几列文字本来会被丢弃灰度） |
-| `main` / `ready` | 差异只出现在扩展名列、数字列的灰字像素，以及（若 fixture 里有未跟踪行）未跟踪行的状态列灰字 |
+| `empty`（干净仓库空状态） | 差异**只**出现在标题文字区（本机实测 1050 像素，全部在 y 0..39） |
+| `unchecked` | 差异只出现在标题文字区 + 扩展名列与两个数字列的灰字像素（实测 1537） |
+| `main` / `ready` | 同上（实测 1537 / 1367） |
 
 **不允许**出现窗口底色、状态栏底色、表头、表格边框、行高、滚动条、勾选框的任何差异——出现任何一条都说明 Task 1/2 的 `.qss` 漏写了对应规则（先补规则再重跑本步），不要用「大概差不多」放过。
 
@@ -1615,6 +1617,7 @@ Expected: `窗口正常打开`、`stderr: (空)`、`残留 python 进程: 0`
 """非 offscreen 启动，确认两套样式都能装上去，且弹窗/tooltip 不漏色。"""
 
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(r"D:\wlr\ai\git-ai-commit")))
@@ -1643,13 +1646,19 @@ def main() -> int:
 
         # Fusion 的默认 tooltip 是淡黄底（ToolTipBase），删掉调色板后
         # 只能靠样式压住；这里实测 tooltip 的实际渲染色。
+        # 注意：QToolTip 是异步显示的，单次 processEvents 常常还拿不到窗口，
+        # 必须给它几帧时间（实测单次调用会 assert 失败，这是脚本的坑不是样式问题）。
         QToolTip.showText(QPoint(60, 60), "提示")
-        window_app.processEvents()
-        tips = [
-            widget
-            for widget in QApplication.topLevelWidgets()
-            if isinstance(widget, QLabel) and widget.isVisible() and widget.text() == "提示"
-        ]
+        tips: list = []
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline and not tips:
+            window_app.processEvents()
+            tips = [
+                widget
+                for widget in QApplication.topLevelWidgets()
+                if isinstance(widget, QLabel) and widget.isVisible() and widget.text() == "提示"
+            ]
+            time.sleep(0.05)
         assert tips, "tooltip 没有弹出来，无法验证"
         image = tips[0].grab().toImage()
         samples = [
