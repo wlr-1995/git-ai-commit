@@ -8,8 +8,13 @@
   美化分支只替换这一段即可。
 """
 
+from pathlib import Path
+
 from PySide6.QtCore import QRect, Qt
 from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPalette, QPixmap
+
+#: 勾选标记（QSS 只能引用文件，不能内嵌图形）。
+CHECK_ICON = (Path(__file__).resolve().parent / "icons" / "check.svg").as_posix()
 
 # --- 设计令牌 ----------------------------------------------------------------
 
@@ -279,7 +284,28 @@ QLabel#statusLabel {{
     padding-top: {SPACE_SM}px;
 }}
 QCheckBox {{ spacing: {SPACE_SM}px; }}
-QCheckBox::indicator {{ width: 15px; height: 15px; }}
+/* Fusion 自绘的勾选框在白底上几乎看不见，这里显式画：白底 + 明确边框，
+   勾选后填充近黑并叠白色对勾，保证在任何行底色上都清晰。 */
+QCheckBox::indicator, QTableView::indicator {{
+    width: 15px;
+    height: 15px;
+    border: 1px solid {TEXT_MUTED};
+    border-radius: 3px;
+    background: {BACKGROUND};
+}}
+QCheckBox::indicator:hover, QTableView::indicator:hover {{
+    border: 1px solid {INK};
+    background: {SURFACE_PRESSED};
+}}
+QCheckBox::indicator:checked, QTableView::indicator:checked {{
+    background: {INK};
+    border: 1px solid {INK};
+    image: url("{CHECK_ICON}");
+}}
+QCheckBox::indicator:checked:hover, QTableView::indicator:checked:hover {{
+    background: {INK_HOVER};
+    border: 1px solid {INK_HOVER};
+}}
 QScrollBar:vertical {{ background: transparent; width: 12px; margin: 0; }}
 QScrollBar::handle:vertical {{
     background: {BORDER};

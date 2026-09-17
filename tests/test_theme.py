@@ -1,6 +1,7 @@
 """白色单色主题测试：调色板、样式表与令牌必须是浅色且只有灰阶。"""
 
 import re
+from pathlib import Path
 
 import pytest
 from PySide6.QtGui import QColor, QPalette
@@ -86,6 +87,17 @@ def test_every_color_is_grayscale(qapp):
     for value in sorted(values):
         color = QColor(value)
         assert color.red() == color.green() == color.blue(), f"{value} 不是灰阶"
+
+
+def test_checkbox_indicator_is_explicitly_drawn(qapp):
+    """Fusion 自绘的勾选框在白底上几乎看不见，必须由样式显式画出来。"""
+    qss = theme.stylesheet()
+
+    assert Path(theme.CHECK_ICON).is_file()
+    assert f'image: url("{theme.CHECK_ICON}")' in qss
+    for selector in ("QCheckBox::indicator", "QTableView::indicator"):
+        assert selector in qss
+    assert "QCheckBox::indicator:checked" in qss
 
 
 def test_tokens_stay_on_scale(qapp):
