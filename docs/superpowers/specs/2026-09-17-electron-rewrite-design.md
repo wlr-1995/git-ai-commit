@@ -330,7 +330,7 @@ function parseDiff(text: string): DiffLine[]
 | M1 脚手架 + core | electron-vite/vitest/tsconfig 就位；`src/core` 全部实现；翻译测试 + 新增 core 测试 | **已完成**（2026-09-17）：`tests/core` 9 文件 96 用例全绿、`tsc --noEmit` 干净、core 行覆盖 96.6%；4 处变异检查（porcelain 偏移、numstat 花括号、readDiff 截断标记、diff 的 `###` 块）均如预期失败 |
 | M2 骨架 + 最小界面 | main/preload/renderer；列表、勾选、过滤、未跟踪开关、刷新、提交、空状态、状态栏、动作行；Playwright 启动冒烟 | **已完成**（2026-09-17）：E2E 8 条覆盖 ①②③④④b⑤⑤b⑥，真临时仓库上「勾选 → 提交」用 `git log` 断言通过 |
 | M3 完整界面 | diff 面板、AI 生成 + 取消、设置弹层 + 主题、错误弹层、忙碌态、快捷键、窄窗折叠 | **已完成**（2026-09-17）：`npm run shots` 三张截图逐张人工核对通过；期间修掉 5 个真实缺陷（见下方「实现期发现的问题」） |
-| M4 打包与切换 | electron-builder 便携目录；`install.ps1`/`uninstall.ps1`/`verify.ps1` 改指向 exe；README 重写；删除 Python 实现与测试；MIT 声明复核 | 卸旧菜单 → 跑新 `install.ps1` → 资源管理器右键「AI 提交」打开新窗口并能提交真实改动；`verify.ps1` 通过 |
+| M4 打包与切换 | electron-builder 便携目录；`install.ps1`/`uninstall.ps1`/`verify.ps1` 改指向 exe；README 重写；删除 Python 实现与测试；MIT 声明复核 | **已完成**（2026-09-17）：实测冷启动 641ms（首次）/ 421ms（之后）、便携目录 368MB、无残留进程；注册表命令真实回放链路（`install\verify-launch.ps1`）通过，窗口标题 `«仓库名» — AI 提交`；Python 版已从工作树删除 |
 
 ## 10. 打包与分发
 - `electron-builder.yml`：`appId: com.xingqiong.git-ai-commit`、`productName: AI 提交`、`win.target: dir`（输出 `dist/win-unpacked/`）、`files` 只含构建产物、`asar: true`、图标 `build/icon.ico`
