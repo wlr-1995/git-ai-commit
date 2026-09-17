@@ -1,0 +1,27 @@
+{
+  "name": "git-ai-commit",
+  "version": "2.0.0",
+  "private": true,
+  "description": "资源管理器右键的 AI 提交工具（Electron 版）",
+  "main": "out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "coverage": "vitest run --coverage",
+    "e2e": "playwright test",
+    "postinstall": "node node_modules/electron/install.js"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "@types/node": "^24.0.0",
+    "@vitest/coverage-v8": "^5.0.1",
+    "electron": "^44.4.1",
+    "electron-builder": "^26.15.3",
+    "electron-vite": "^5.0.0",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.1"
+  }
+}
