@@ -110,3 +110,24 @@ def diff_for(repo_root, paths: list[str], max_lines: int = 200) -> str:
     """采集指定路径的 diff 文本并截断。"""
     sections = [section for section in (_diff_one(repo_root, p) for p in paths) if section]
     return truncate("\n".join(sections), max_lines)
+
+
+def stage(repo_root, paths: list[str]) -> None:
+    """暂存指定路径（含新增、修改、删除），不影响其它路径。"""
+    if not paths:
+        return
+    run_git(["add", "-A", "--", *paths], cwd=repo_root)
+
+
+def commit(repo_root, message: str, paths: list[str]) -> str:
+    """只提交指定路径，保留其它已暂存内容不动。"""
+    if not paths:
+        raise GitError("没有勾选任何文件")
+    code, out, err = run_git(
+        ["commit", "-m", message, "--", *paths],
+        cwd=repo_root,
+        check=False,
+    )
+    if code != 0:
+        raise GitError(err.strip() or out.strip() or "git commit 失败")
+    return out.strip()
