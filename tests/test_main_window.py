@@ -734,6 +734,8 @@ def test_open_settings_saves_and_reloads_config(qapp, tmp_path, monkeypatch):
     monkeypatch.setattr(mw, "load_config", config_module.load_config)
     window.open_settings()
 
+    assert qapp.styleSheet() == theme.load_stylesheet("flat"), "保存成功后应保留新样式"
+
     saved = json.loads(cfg_path.read_text(encoding="utf-8"))
     assert saved["api"]["url"] == "http://example.test/v1"
     assert saved["api"]["model"] == "demo-model"
@@ -757,10 +759,10 @@ def test_open_settings_cancel_restores_style_and_writes_nothing(qapp, tmp_path, 
     before = qapp.styleSheet()
 
     def fake_exec(self):
-        # 模拟用户先预览了 flat，然后取消
+        # 切样式应由 open_settings 连接的 stylePreview 信号触发实时预览，然后取消
         flat = self.style_combo.findData("flat")
         self.style_combo.setCurrentIndex(flat)
-        window.apply_style("flat")
+        assert qapp.styleSheet() == theme.load_stylesheet("flat"), "切样式应实时预览"
         self.reject()
         return self.result()
 

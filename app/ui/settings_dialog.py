@@ -44,6 +44,14 @@ class SettingsDialog(QDialog):
         known = {key for key, _label in theme.available_styles()}
         return wanted if wanted in known else theme.DEFAULT_STYLE
 
+    @staticmethod
+    def _as_int(value, fallback: int) -> int:
+        """配置可能被手改成非数字；这里退回默认值而不是抛异常。"""
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return fallback
+
     def _build_ui(self, config: dict) -> None:
         api = config.get("api", {})
 
@@ -66,7 +74,7 @@ class SettingsDialog(QDialog):
         self.timeout_spin = QSpinBox()
         self.timeout_spin.setRange(1, 600)
         self.timeout_spin.setSuffix(" 秒")
-        self.timeout_spin.setValue(int(api.get("timeout") or 60))
+        self.timeout_spin.setValue(self._as_int(api.get("timeout") or 60, 60))
 
         self.validation_hint = QLabel()
         self.validation_hint.setObjectName("hintLabel")
@@ -128,13 +136,15 @@ class SettingsDialog(QDialog):
                 "api_key": self.api_key_edit.text().strip(),
                 "timeout": int(self.timeout_spin.value()),
             },
-            "ui": {"style": self.current_style()},
+            "ui": {"style": self.current_style() or theme.DEFAULT_STYLE},
         }
 
     def _on_style_changed(self, _index: int) -> None:
         self.stylePreview.emit(self.current_style())
 
     def _on_save_clicked(self) -> None:
+        if not self.url_edit.text().strip():
+            return
         if self._on_save is not None:
             error = self._on_save(self.values())
             if error:

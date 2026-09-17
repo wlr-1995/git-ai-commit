@@ -80,6 +80,14 @@ def test_values_only_exposes_the_agreed_keys(qapp):
     dialog.close()
 
 
+@pytest.mark.parametrize("bad_timeout", ["1m", []])
+def test_non_numeric_timeout_falls_back_to_default(qapp, bad_timeout):
+    dialog = SettingsDialog(_config(api__timeout=bad_timeout))
+
+    assert dialog.timeout_spin.value() == 60
+    dialog.close()
+
+
 def test_api_key_is_masked(qapp):
     dialog = SettingsDialog(_config(api__api_key="secret"))
 

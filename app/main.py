@@ -45,8 +45,11 @@ def main(argv: list[str] | None = None) -> int:
 
         app = QApplication(argv)
         # 先按配置里的样式套主题，避免先画一帧默认样式再切换。
-        config = load_config()
-        apply_light_theme(app, config.get("ui", {}).get("style") or DEFAULT_STYLE)
+        try:
+            style = load_config().get("ui", {}).get("style") or DEFAULT_STYLE
+        except OSError:
+            style = DEFAULT_STYLE
+        apply_light_theme(app, style)
         root = find_repo_root(start)
         if root is None:
             QMessageBox.critical(None, "AI 提交", f"该目录不是 Git 仓库：\n{start}")
