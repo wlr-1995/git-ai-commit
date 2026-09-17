@@ -58,7 +58,21 @@
 - **取消 / Esc / 关窗** → 把原样式应用回去，不写盘
 - **保存** → 保留新样式，写盘
 
-对话框**不直接操作 `QApplication`**：只发 `stylePreview(str)` 信号，主窗口负责预览——主窗口用 `QApplication.instance()` 取到应用，调用 `theme.apply_style(app, name)` 并同步表格最小高度。这样对话框可脱离 QApplication 单测。
+对话框**不直接操作 `QApplication`**：只发 `stylePreview(str)` 信号，主窗口负责预览。
+
+主窗口对外只暴露**一个**换样式入口（阶段一的最终审查点名要求，避免"换了样式忘了同步表格最小高度"）：
+
+```python
+# app/ui/main_window.py
+def apply_style(self, style: str) -> None:
+    """换样式：设置应用样式表并同步依赖行高的布局（设置对话框预览/保存都走它）。"""
+    app = QApplication.instance()
+    if app is not None:
+        theme.apply_style(app, style)
+    self._sync_table_min_height()
+```
+
+原因：`app.setStyleSheet` 是全应用级的，换样式会把所有已建窗口重新 polish，行高随之变化；而 `_sync_table_min_height()` 只在 `showEvent` 里跑过，不重新调用的话最小高度会停留在旧样式的值上。这样对话框可脱离 QApplication 单测。
 
 ### 3.3 保存
 
@@ -67,7 +81,7 @@
 1. `self.config = deep_merge(self.config, dialog.values())`——`values()` 只含 `api` 的 4 个键与 `ui.style`，所以深合并不会碰其它配置
 2. `save_config(self.config)` 写盘（UTF-8，保持既有格式）
 3. `self.config = load_config()` 重载（保证内存与磁盘一致）
-4. 应用新样式 + `_sync_table_min_height()`
+4. `self.apply_style(<新样式>)`（上面那个统一入口：应用样式表 + 同步表格最小高度）
 5. 状态栏提示「设置已保存」
 
 模型参数**不需要重启也不立刻发请求**：`_generate` 每次都从 `self.config.get("api")` 现取，下次点「AI 生成」自然生效。
@@ -130,6 +144,7 @@ class SettingsDialog(QDialog):
 | `test_dialog_unknown_style_falls_back` | 配置写 `style = "ghost"` → 下拉选中默认样式，不抛异常 |
 | `test_preview_signal_fires_on_style_change` | 改变下拉 → 收到 `stylePreview`，参数为新 key（用 `QSignalSpy`/回调计数） |
 | `test_cancel_restores_previous_style` | 主窗口层：打开 → 切样式 → 取消 → `app.styleSheet()` 与打开前一致，且配置文件未被改写 |
+| `test_apply_style_updates_min_table_height` | 主窗口层：`window.apply_style("flat")` 后 `minimumHeight()` 等于 flat 的行高 `28 * 4 + 40`（阶段一留下的盲区：`_sync_table_min_height` 原来只在 `showEvent` 跑） |
 | `test_values_returns_expected_fields` | `values()` 只含 4 个 api 字段 + `ui.style`，不含 `prompt`/`language`/`max_tokens` |
 | `test_api_key_is_masked` | `echoMode() == QLineEdit.EchoMode.Password` |
 | `test_save_writes_config_and_reloads` | 用临时 `CONFIG_FILE`（monkeypatch）→ 保存后文件里 url/model/api_key/timeout/style 都是新值，`window.config` 同步更新 |
