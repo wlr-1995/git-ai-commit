@@ -23,6 +23,7 @@ DEFAULT_STYLE = "traditional"
 #: 勾选标记（QSS 只能引用文件，不能内嵌图形；测试用它确认引用真实存在）。
 CHECK_ICON = (ICONS_DIR / "check.svg").as_posix()
 
+# 只有双引号形式 url("...") 会被解析为相对路径；无引号/单引号形式交给 Qt（按当前工作目录解析）。
 _URL_RE = re.compile(r'url\(\s*"([^"]+)"\s*\)')
 _LABEL_RE = re.compile(r"^\s*/\*\s*名称\s*[:：]\s*(.+?)\s*\*/")
 
@@ -104,7 +105,12 @@ def load_stylesheet(style: str | None = None) -> str:
 
 
 def apply_style(app, style: str) -> None:
-    """把一套样式应用到整个应用。"""
+    """把一套样式应用到整个应用。
+
+    样式表是全应用级的：运行期换样式会把所有已建窗口重新 polish，行高随之变化，
+    因此布局依赖行高的调用方必须在换样式后重新调用
+    ``MainWindow._sync_table_min_height()``（stage 2 的设置对话框会这么做）。
+    """
     app.setStyleSheet(load_stylesheet(style))
 
 

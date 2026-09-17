@@ -26,10 +26,11 @@ def test_style_files_are_grayscale(qapp):
     files = _styles()
     assert files, "styles 目录里没有任何样式"
     for key, path in files:
-        hexes = re.findall(r"#([0-9a-fA-F]{6})", path.read_text(encoding="utf-8"))
+        hexes = re.findall(r"#((?:[0-9a-fA-F]{3}){1,2})\b", path.read_text(encoding="utf-8"))
         assert hexes, f"{key}.qss 里没有任何色值"
         for value in hexes:
-            red, green, blue = (int(value[i : i + 2], 16) for i in (0, 2, 4))
+            full = "".join(ch * 2 for ch in value) if len(value) == 3 else value
+            red, green, blue = (int(full[i : i + 2], 16) for i in (0, 2, 4))
             assert red == green == blue, f"{key}.qss 的 #{value} 不是灰阶"
 
 
@@ -230,6 +231,7 @@ def test_style_owns_grid_and_zebra(styled_window):
         window = styled_window(style)
         window.show_untracked_check.setChecked(True)
         window._on_changes_loaded(changes, {"a.txt": (2, 1), "b.txt": (1, 1)})
+        assert window.changes_table.rowCount() == len(changes), "表格没有渲染出已加载的行"
         image = window.changes_table.viewport().grab().toImage()
         return _count_color(image, "#e6e6e6"), _count_color(image, "#f7f7f7")
 
@@ -265,9 +267,14 @@ def test_window_renders_white(qapp, styled_window):
     image = window.grab().toImage()
     assert image.pixelColor(5, 5).name() == "#ffffff"
 
+    viewport = window.message_edit.viewport()
+    inside = viewport.mapTo(window, viewport.rect().center())
+    assert image.pixelColor(inside).name() == "#ffffff"
+
 
 def test_combo_popup_is_monochrome(qapp, styled_window):
-    """删掉调色板后，下拉弹窗的选中色必须来自样式，不能漏出 Fusion 蓝。"""
+    """验证样式规则确实生效：下拉弹窗选中行渲染成样式里的灰色 #ededed，
+    而不是未套样式时的系统高亮色。"""
     from PySide6.QtWidgets import QComboBox
 
     styled_window("traditional")
