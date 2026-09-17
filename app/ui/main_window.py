@@ -203,12 +203,15 @@ class MainWindow(QMainWindow):
 
         self.message_edit = QPlainTextEdit()
         self.message_edit.setPlaceholderText("填写提交信息，或用「AI 生成」按改动生成")
+        self.message_edit.setMinimumHeight(96)
         self.message_edit.textChanged.connect(self._update_summary)
-        layout.addWidget(self.message_edit, 2)
+        layout.addWidget(self.message_edit, 1)
 
         layout.addLayout(self._build_list_header())
 
         self.changes_table = self._build_table()
+        # 至少露出 4 整行，避免默认窗口尺寸下最后一行被截成半行。
+        self.changes_table.setMinimumHeight(theme.TABLE_ROW_HEIGHT * 4 + 40)
         layout.addWidget(self.changes_table, 3)
 
         self.empty_state = QLabel(self.changes_table.viewport())
