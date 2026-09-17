@@ -12,6 +12,9 @@ RENAMED = "renamed"
 UNTRACKED = "untracked"
 CONFLICTED = "conflicted"
 
+#: 未跟踪文件参与 diff 分析时的大小上限；超过则只给标记，不读取内容。
+_MAX_UNTRACKED_BYTES = 512 * 1024
+
 STATUS_LETTER = {
     MODIFIED: "M",
     ADDED: "A",
@@ -101,10 +104,18 @@ def _diff_one(repo_root, path: str) -> str:
     full = Path(repo_root) / path
     if not full.is_file():
         return ""
+    # 只读取上限 +1 字节：既避免超大文件整体读入内存，也用于判断是否超限。
     try:
-        content = full.read_text(encoding="utf-8", errors="replace")
+        with full.open("rb") as handle:
+            data = handle.read(_MAX_UNTRACKED_BYTES + 1)
     except OSError:
         return f"### 新增或不可读文件: {path}"
+    if len(data) > _MAX_UNTRACKED_BYTES:
+        limit_kb = _MAX_UNTRACKED_BYTES // 1024
+        return f"### 新增文件过大，已跳过: {path}（超过 {limit_kb} KB）"
+    if b"\x00" in data:
+        return f"### 新增疑似二进制文件，已跳过: {path}"
+    content = data.decode("utf-8", errors="replace")
     body = "\n".join("+" + line for line in content.splitlines())
     return f"### 新增文件: {path}\n{body}"
 
@@ -115,11 +126,29 @@ def diff_for(repo_root, paths: list[str], max_lines: int = 200) -> str:
     return truncate("\n".join(sections), max_lines)
 
 
+def commit_pathspecs(changes: list[FileChange]) -> list[str]:
+    """构造提交用 pathspec：重命名同时包含新路径与旧路径。
+
+    重命名在索引中是「删除旧路径 + 新增新路径」，只提交新路径会把旧路径的
+    删除遗留在暂存区；因此提交时需要带上 ``orig_path``。
+    """
+    paths: list[str] = []
+    for change in changes:
+        paths.append(change.path)
+        if change.status == RENAMED and change.orig_path and change.orig_path not in paths:
+            paths.append(change.orig_path)
+    return paths
+
+
 def stage(repo_root, paths: list[str]) -> None:
-    """暂存指定路径（含新增、修改、删除），不影响其它路径。"""
+    """暂存指定路径（含新增、修改、删除），不影响其它路径。
+
+    尽力而为：删除一旦被暂存（例如先 ``git rm``），再次 ``git add`` 会因
+    pathspec 不匹配而报错；此时放行，由 ``commit`` 作为真正的校验关卡。
+    """
     if not paths:
         return
-    run_git(["add", "-A", "--", *paths], cwd=repo_root)
+    run_git(["add", "-A", "--", *paths], cwd=repo_root, check=False)
 
 
 def commit(repo_root, message: str, paths: list[str]) -> str:

@@ -1,6 +1,6 @@
 import subprocess
 
-from app.core.repo import diff_for, truncate
+from app.core.repo import _MAX_UNTRACKED_BYTES, diff_for, truncate
 
 
 def _init_repo(path):
@@ -49,3 +49,26 @@ def test_diff_for_multiple_paths(tmp_path):
     diff = diff_for(tmp_path, ["a.txt", "b.txt"])
     assert "+a" in diff
     assert "+b" in diff
+
+
+def test_diff_for_large_untracked_file_uses_compact_marker(tmp_path):
+    _init_repo(tmp_path)
+    payload = b"Z" * (_MAX_UNTRACKED_BYTES + 1024)
+    (tmp_path / "big.bin").write_bytes(payload)
+
+    diff = diff_for(tmp_path, ["big.bin"], max_lines=0)
+    assert "过大" in diff
+    assert "已跳过" in diff
+    assert "+Z" not in diff
+    assert len(diff) < 200
+
+
+def test_diff_for_binary_untracked_file_uses_compact_marker(tmp_path):
+    _init_repo(tmp_path)
+    (tmp_path / "blob.bin").write_bytes(b"abc\x00def\nghi\n")
+
+    diff = diff_for(tmp_path, ["blob.bin"], max_lines=0)
+    assert "二进制" in diff
+    assert "已跳过" in diff
+    assert "abc" not in diff
+    assert len(diff) < 200

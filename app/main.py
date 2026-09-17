@@ -20,24 +20,39 @@ def resolve_start_path(argv: list[str]) -> str:
     return str(Path.cwd())
 
 
+def show_fatal(message: str) -> None:
+    """尽力弹出致命错误对话框；无图形环境时静默，避免二次异常。"""
+    try:
+        from PySide6.QtWidgets import QApplication, QMessageBox
+
+        QApplication.instance() or QApplication([])
+        QMessageBox.critical(None, "AI 提交 启动失败", message)
+    except Exception:  # noqa: BLE001 - 兜底：报错路径本身不应再抛异常
+        pass
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv if argv is None else argv)
     start = resolve_start_path(argv)
+    # pythonw 下没有控制台，任何启动异常都必须弹窗，否则右键菜单会「毫无反应」。
+    try:
+        from PySide6.QtWidgets import QApplication, QMessageBox
 
-    from PySide6.QtWidgets import QApplication, QMessageBox
+        from app.core.repo import find_repo_root
+        from app.ui.main_window import MainWindow
 
-    from app.core.repo import find_repo_root
-    from app.ui.main_window import MainWindow
+        app = QApplication(argv)
+        root = find_repo_root(start)
+        if root is None:
+            QMessageBox.critical(None, "AI 提交", f"该目录不是 Git 仓库：\n{start}")
+            return 1
 
-    app = QApplication(argv)
-    root = find_repo_root(start)
-    if root is None:
-        QMessageBox.critical(None, "AI 提交", f"该目录不是 Git 仓库：\n{start}")
+        window = MainWindow(root)
+        window.show()
+        return app.exec()
+    except Exception as exc:  # noqa: BLE001 - 见上：无控制台必须弹窗
+        show_fatal(f"{type(exc).__name__}: {exc}")
         return 1
-
-    window = MainWindow(root)
-    window.show()
-    return app.exec()
 
 
 if __name__ == "__main__":

@@ -1,9 +1,17 @@
 """git.exe 子进程封装：统一编码、超时与错误信息。"""
 
+import os
 import subprocess
 from pathlib import Path
 
 _GIT_PREFIX = ["git", "-c", "core.quotepath=false"]
+
+
+def _git_env() -> dict:
+    """git 运行环境：把 pathspec 当作字面量，文件名中的 ``* ? [`` 不再被当作通配。"""
+    env = os.environ.copy()
+    env["GIT_LITERAL_PATHSPECS"] = "1"
+    return env
 
 
 class GitError(RuntimeError):
@@ -27,6 +35,7 @@ def run_git(
             cwd=str(cwd) if cwd else None,
             capture_output=True,
             timeout=timeout,
+            env=_git_env(),
         )
     except NotADirectoryError as exc:
         raise GitError(f"工作目录无效（不存在或不是目录）: {cwd}") from exc

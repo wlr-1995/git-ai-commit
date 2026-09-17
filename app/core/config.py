@@ -43,7 +43,7 @@ def load_config(path: Path | None = None) -> dict:
     try:
         with path.open("r", encoding="utf-8") as handle:
             loaded = json.load(handle)
-    except (json.JSONDecodeError, OSError):
+    except (json.JSONDecodeError, OSError, UnicodeDecodeError):
         return copy.deepcopy(DEFAULT_CONFIG)
     if not isinstance(loaded, dict):
         return copy.deepcopy(DEFAULT_CONFIG)

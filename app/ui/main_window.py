@@ -132,6 +132,15 @@ class MainWindow(QMainWindow):
                 paths.append(item.data(Qt.UserRole))
         return paths
 
+    def checked_changes(self) -> list[repo.FileChange]:
+        """勾选项对应的变更对象（用于重命名时补全旧路径）。"""
+        checked = set(self.checked_paths())
+        return [change for change in self._changes if change.path in checked]
+
+    def checked_commit_paths(self) -> list[str]:
+        """提交用 pathspec：重命名同时包含新旧路径，避免旧路径删除被遗留。"""
+        return repo.commit_pathspecs(self.checked_changes())
+
     def _set_all(self, checked: bool) -> None:
         state = Qt.Checked if checked else Qt.Unchecked
         for index in range(self.list_widget.count()):
@@ -162,7 +171,8 @@ class MainWindow(QMainWindow):
         )
 
     def on_commit(self) -> None:
-        paths = self.checked_paths()
+        changes = self.checked_changes()
+        paths = [change.path for change in changes]
         message = self.message_edit.toPlainText().strip()
         if not paths:
             self._error("请先勾选至少一个文件")
@@ -170,10 +180,11 @@ class MainWindow(QMainWindow):
         if not message:
             self._error("提交信息不能为空")
             return
+        commit_paths = repo.commit_pathspecs(changes)
 
         def job():
             repo.stage(self.repo_root, paths)
-            return repo.commit(self.repo_root, message, paths)
+            return repo.commit(self.repo_root, message, commit_paths)
 
         self._run_worker(job, self._on_committed, start_text="正在提交…", operation=COMMIT)
 
@@ -223,6 +234,13 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event) -> None:  # noqa: N802 - Qt 命名
         worker = self._worker
         if worker is not None and worker.isRunning():
+            # 提交不可取消：阻塞等待会让事件循环停摆，若提交恰好在此期间完成并
+            # 排队了 succeeded，窗口会先关闭，导致「提交成功」永远不显示。
+            # 因此改为忽略本次关闭，由正常完成回调报告结果。
+            if self._operation == COMMIT:
+                event.ignore()
+                self.status.setText("正在提交，请稍候…")
+                return
             # 仅 AI 生成可取消；提交一旦开始必须跑完，取消会隐藏真实发生的提交。
             if self._operation == GENERATE:
                 worker.cancel()

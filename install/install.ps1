@@ -20,7 +20,7 @@ $bases = @(
 foreach ($base in $bases) {
     New-Item -Path $base -Force | Out-Null
     Set-ItemProperty -Path $base -Name '(default)' -Value 'AI 提交'
-    Set-ItemProperty -Path $base -Name 'Icon' -Value $pythonw
+    Set-ItemProperty -Path $base -Name 'Icon' -Value "`"$pythonw`""
     New-Item -Path "$base\command" -Force | Out-Null
     Set-ItemProperty -Path "$base\command" -Name '(default)' -Value $command
 }

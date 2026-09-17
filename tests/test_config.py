@@ -32,6 +32,14 @@ def test_load_config_survives_broken_json(tmp_path: Path):
     assert cfg["git"]["max_diff_lines"] == 200
 
 
+def test_load_config_survives_non_utf8_file(tmp_path: Path):
+    cfg_file = tmp_path / "config.json"
+    cfg_file.write_bytes(b"\xff\xfe{ this is not utf-8")
+    cfg = load_config(cfg_file)
+    assert cfg["git"]["max_diff_lines"] == 200
+    assert cfg["api"]["model"] == DEFAULT_CONFIG["api"]["model"]
+
+
 def test_save_config_roundtrip_unicode(tmp_path: Path):
     cfg_file = tmp_path / "config.json"
     cfg = load_config(cfg_file)
