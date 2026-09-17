@@ -327,7 +327,7 @@ function parseDiff(text: string): DiffLine[]
 
 | 里程碑 | 内容 | 验收门 |
 |---|---|---|
-| M1 脚手架 + core | electron-vite/vitest/tsconfig 就位；`src/core` 全部实现；翻译测试 + 新增 core 测试 | `npm test` 全绿、`npm run typecheck` 干净、core 覆盖 ≥90% |
+| M1 脚手架 + core | electron-vite/vitest/tsconfig 就位；`src/core` 全部实现；翻译测试 + 新增 core 测试 | **已完成**（2026-09-17）：`tests/core` 9 文件 96 用例全绿、`tsc --noEmit` 干净、core 行覆盖 96.6%；4 处变异检查（porcelain 偏移、numstat 花括号、readDiff 截断标记、diff 的 `###` 块）均如预期失败 |
 | M2 骨架 + 最小界面 | main/preload/renderer；列表、勾选、过滤、未跟踪开关、刷新、提交、空状态、状态栏、动作行；Playwright 启动冒烟 | 对真临时仓库跑通「勾选 → 提交」（E2E ②），`git log` 断言通过 |
 | M3 完整界面 | diff 面板、AI 生成 + 取消、设置弹层 + 主题、错误弹层、忙碌态、快捷键、窄窗折叠 | E2E ①③④⑤ 全绿 + 人工截图确认视觉；核心告一段落 |
 | M4 打包与切换 | electron-builder 便携目录；`install.ps1`/`uninstall.ps1`/`verify.ps1` 改指向 exe；README 重写；删除 Python 实现与测试；MIT 声明复核 | 卸旧菜单 → 跑新 `install.ps1` → 资源管理器右键「AI 提交」打开新窗口并能提交真实改动；`verify.ps1` 通过 |
