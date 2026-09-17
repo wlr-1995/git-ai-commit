@@ -247,3 +247,42 @@ export async function diffNumstat(repoRoot: string): Promise<Record<string, [num
   }
   return stats
 }
+
+/**
+ * 构造提交用 pathspec：重命名同时包含新路径与旧路径。
+ *
+ * 重命名在索引中是「删除旧路径 + 新增新路径」，只提交新路径会把旧路径的删除
+ * 遗留在暂存区；因此提交时需要带上 origPath。
+ */
+export function commitPathspecs(changes: FileChange[]): string[] {
+  const paths: string[] = []
+  for (const change of changes) {
+    paths.push(change.path)
+    if (change.status === RENAMED && change.origPath && !paths.includes(change.origPath)) {
+      paths.push(change.origPath)
+    }
+  }
+  return paths
+}
+
+/**
+ * 暂存指定路径（含新增、修改、删除），不影响其它路径。
+ *
+ * 尽力而为：删除一旦被暂存（例如先 git rm），再次 git add 会因 pathspec 不匹配
+ * 而报错；此时放行，由 commit 作为真正的校验关卡。
+ */
+export async function stage(repoRoot: string, paths: string[]): Promise<void> {
+  if (paths.length === 0) return
+  await runGit(["add", "-A", "--", ...paths], { cwd: repoRoot, check: false })
+}
+
+/** 只提交指定路径，保留其它已暂存内容不动。 */
+export async function commit(repoRoot: string, message: string, paths: string[]): Promise<string> {
+  if (paths.length === 0) throw new GitError("没有勾选任何文件", "exit")
+  const { code, stdout, stderr } = await runGit(["commit", "-m", message, "--", ...paths], {
+    cwd: repoRoot,
+    check: false,
+  })
+  if (code !== 0) throw new GitError(stderr.trim() || stdout.trim() || "git commit 失败", "exit")
+  return stdout.trim()
+}
