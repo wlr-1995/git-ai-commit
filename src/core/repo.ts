@@ -202,3 +202,48 @@ export async function readDiff(
     omitted,
   }
 }
+
+function splitOnce(text: string, separator: string): [string, string] {
+  const index = text.indexOf(separator)
+  if (index < 0) return [text, ""]
+  return [text.slice(0, index), text.slice(index + separator.length)]
+}
+
+/** 把 numstat 的路径字段归一为新路径（重命名形如 `old => new`）。 */
+export function numstatNewPath(raw: string): string {
+  if (!raw.includes(" => ")) return raw
+  if (raw.includes("{") && raw.includes("}")) {
+    const [prefix, rest] = splitOnce(raw, "{")
+    const [middle, suffix] = splitOnce(rest, "}")
+    const [, newName] = splitOnce(middle, " => ")
+    return `${prefix}${newName}${suffix}`
+  }
+  const [, newName] = splitOnce(raw, " => ")
+  return newName
+}
+
+/**
+ * 返回 { 路径: [添加行数, 删除行数] }，键为重命名后的新路径。
+ *
+ * - 只覆盖已跟踪的变更；未跟踪文件不在结果里（调用方留空即可）。
+ * - 二进制文件返回 [null, null]，界面显示为 `-`。
+ * - 空仓库（无 HEAD）返回空字典。
+ */
+export async function diffNumstat(repoRoot: string): Promise<Record<string, [number | null, number | null]>> {
+  const { code, stdout } = await runGit(["diff", "--numstat", "HEAD"], { cwd: repoRoot, check: false })
+  if (code !== 0) return {}
+
+  const stats: Record<string, [number | null, number | null]> = {}
+  for (const line of stdout.split(/\r?\n/)) {
+    if (!line.trim()) continue
+    const parts = line.split("\t")
+    if (parts.length < 3) continue
+    const addedRaw = parts[0]
+    const deletedRaw = parts[1]
+    const rawPath = parts.slice(2).join("\t")
+    const added = /^\d+$/.test(addedRaw) ? Number(addedRaw) : null
+    const deleted = /^\d+$/.test(deletedRaw) ? Number(deletedRaw) : null
+    stats[numstatNewPath(rawPath)] = [added, deleted]
+  }
+  return stats
+}
