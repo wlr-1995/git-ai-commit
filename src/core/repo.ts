@@ -1,3 +1,6 @@
+import { open } from "node:fs/promises"
+import { join } from "node:path"
+
 import { GitError, runGit } from "./gitcmd"
 
 export const MODIFIED = "modified"
@@ -110,4 +113,92 @@ export async function listChanges(repoRoot: string): Promise<FileChange[]> {
 export async function hasCommits(repoRoot: string): Promise<boolean> {
   const { code } = await runGit(["rev-parse", "--verify", "HEAD"], { cwd: repoRoot, check: false })
   return code === 0
+}
+
+/** 按 \r\n / \r / \n 切分；输入以换行结尾时丢弃末尾空串（对齐 Python splitlines 的可观察行为）。 */
+function splitLines(text: string): string[] {
+  if (text === "") return []
+  const lines = text.split(/\r\n|\r|\n/)
+  if (lines.length > 0 && lines[lines.length - 1] === "") lines.pop()
+  return lines
+}
+
+/** 超过 maxLines 时保留前 maxLines 行并标注省略数。 */
+export function truncate(text: string, maxLines: number): string {
+  if (maxLines <= 0) return text
+  const lines = splitLines(text)
+  if (lines.length <= maxLines) return text
+  const omitted = lines.length - maxLines
+  return `${lines.slice(0, maxLines).join("\n")}\n... (已截断，省略 ${omitted} 行)`
+}
+
+/**
+ * 单路径 diff：先试已跟踪的 diff，再退回「未跟踪文件」的内容预览。
+ *
+ * 读取时只读上限 +1 字节：既避免超大文件整体读入内存，也用于判断是否超限。
+ */
+async function diffOne(repoRoot: string, relPath: string): Promise<string> {
+  const { code, stdout } = await runGit(["diff", "HEAD", "--", relPath], { cwd: repoRoot, check: false })
+  if (code === 0 && stdout.trim()) return stdout
+
+  const full = join(repoRoot, relPath)
+  let handle
+  try {
+    handle = await open(full, "r")
+  } catch {
+    return `### 新增或不可读文件: ${relPath}`
+  }
+  try {
+    const stat = await handle.stat()
+    if (!stat.isFile()) return ""
+    const buffer = Buffer.alloc(MAX_UNTRACKED_BYTES + 1)
+    const { bytesRead } = await handle.read(buffer, 0, MAX_UNTRACKED_BYTES + 1, 0)
+    const data = buffer.subarray(0, bytesRead)
+    if (data.length > MAX_UNTRACKED_BYTES) {
+      const limitKb = Math.floor(MAX_UNTRACKED_BYTES / 1024)
+      return `### 新增文件过大，已跳过: ${relPath}（超过 ${limitKb} KB）`
+    }
+    if (data.includes(0)) return `### 新增疑似二进制文件，已跳过: ${relPath}`
+    const body = splitLines(data.toString("utf8"))
+      .map((line) => `+${line}`)
+      .join("\n")
+    return `### 新增文件: ${relPath}\n${body}`
+  } catch {
+    return `### 新增或不可读文件: ${relPath}`
+  } finally {
+    await handle.close()
+  }
+}
+
+/** 采集指定路径的 diff 文本并截断。 */
+export async function diffFor(repoRoot: string, paths: string[], maxLines = 200): Promise<string> {
+  const sections: string[] = []
+  for (const path of paths) {
+    const section = await diffOne(repoRoot, path)
+    if (section) sections.push(section)
+  }
+  return truncate(sections.join("\n"), maxLines)
+}
+
+/**
+ * 单路径 diff 的读取接口（diff 面板用）。
+ *
+ * 与 `diffFor` 共用同一条 `diffOne` 路径与同一套省略语义，只是把「是否截断、
+ * 省略多少行」显式返回，而不是塞进文本里让渲染层去猜。
+ */
+export async function readDiff(
+  repoRoot: string,
+  relPath: string,
+  maxLines: number,
+): Promise<{ text: string; truncated: boolean; omitted: number }> {
+  const text = await diffOne(repoRoot, relPath)
+  if (maxLines <= 0) return { text, truncated: false, omitted: 0 }
+  const lines = splitLines(text)
+  if (lines.length <= maxLines) return { text, truncated: false, omitted: 0 }
+  const omitted = lines.length - maxLines
+  return {
+    text: `${lines.slice(0, maxLines).join("\n")}\n... (已截断，省略 ${omitted} 行)`,
+    truncated: true,
+    omitted,
+  }
 }
