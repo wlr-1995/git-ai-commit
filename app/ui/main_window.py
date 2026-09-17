@@ -223,7 +223,9 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event) -> None:  # noqa: N802 - Qt 命名
         worker = self._worker
         if worker is not None and worker.isRunning():
-            worker.cancel()
+            # 仅 AI 生成可取消；提交一旦开始必须跑完，取消会隐藏真实发生的提交。
+            if self._operation == GENERATE:
+                worker.cancel()
             if not worker.wait(5000):
                 event.ignore()
                 return
