@@ -1,5 +1,8 @@
 """主窗口：变更文件勾选 + AI 生成 + 提交。"""
 
+import re
+import unicodedata
+
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QHBoxLayout,
@@ -21,6 +24,79 @@ from .worker import FunctionWorker
 REFRESH = "refresh"
 GENERATE = "generate"
 COMMIT = "commit"
+
+# 状态栏与对话框只显示这么长的摘要；完整错误放进可滚动详情，避免撑宽窗口。
+_ERROR_SUMMARY_LIMIT = 120
+# QMessageBox 不会自动换行，按显示列宽预先折行，把对话框宽度限制在合理范围。
+_DIALOG_WRAP_COLUMNS = 38
+
+
+def _char_width(char: str) -> int:
+    """东亚全角字符按两列计算。"""
+    return 2 if unicodedata.east_asian_width(char) in ("W", "F") else 1
+
+
+def _display_width(text: str) -> int:
+    """估算字符串的显示列宽。"""
+    return sum(_char_width(char) for char in text)
+
+
+def _split_by_width(text: str, columns: int) -> tuple[str, str]:
+    """把 text 按显示列宽切一刀，返回 (头部, 余下)。"""
+    width = 0
+    for index, char in enumerate(text):
+        char_width = _char_width(char)
+        if width + char_width > columns:
+            return text[:index], text[index:]
+        width += char_width
+    return text, ""
+
+
+def _wrap_for_dialog(text: str, columns: int = _DIALOG_WRAP_COLUMNS) -> str:
+    """按显示宽度折行：优先在空白处断行，超长单词按列宽硬切。
+
+    QMessageBox 自身不会换行，长错误会把对话框撑得很宽，所以先手动折行。
+    """
+    lines: list[str] = []
+    for paragraph in text.splitlines() or [""]:
+        current = ""
+        width = 0
+        for word in re.findall(r"\S+", paragraph):
+            word_width = _display_width(word)
+            if current and width + 1 + word_width > columns:
+                lines.append(current)
+                current = ""
+                width = 0
+            while word_width > columns:
+                head, word = _split_by_width(word, columns)
+                if current:
+                    lines.append(current)
+                    current = ""
+                    width = 0
+                lines.append(head)
+                word_width = _display_width(word)
+            if not word:
+                continue
+            if current:
+                current += " " + word
+                width += 1 + word_width
+            else:
+                current = word
+                width = word_width
+        if current:
+            lines.append(current)
+    return "\n".join(lines)
+
+
+def _error_summary(message: str) -> str:
+    """把可能很长的错误压成单行短摘要。"""
+    text = (message or "").strip()
+    first_line = text.splitlines()[0].strip() if text else ""
+    if not first_line:
+        return "发生未知错误"
+    if len(first_line) <= _ERROR_SUMMARY_LIMIT:
+        return first_line
+    return first_line[:_ERROR_SUMMARY_LIMIT] + "…"
 
 
 class MainWindow(QMainWindow):
@@ -79,6 +155,7 @@ class MainWindow(QMainWindow):
         layout.addLayout(actions)
 
         self.status = QLabel("就绪")
+        self.status.setWordWrap(True)
         layout.addWidget(self.status)
 
         self.setCentralWidget(central)
@@ -258,6 +335,15 @@ class MainWindow(QMainWindow):
         QMessageBox.information(self, "AI 提交", "提交成功")
         self.refresh()
 
+    def _build_error_box(self, message: str) -> QMessageBox:
+        """错误对话框：只显示短摘要，完整信息放进可滚动详情，避免撑宽窗口。"""
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Warning)
+        box.setWindowTitle("AI 提交")
+        box.setText(_wrap_for_dialog(_error_summary(message)))
+        box.setDetailedText(message)
+        return box
+
     def _error(self, message: str) -> None:
-        self.status.setText(f"错误：{message}")
-        QMessageBox.warning(self, "AI 提交", message)
+        self.status.setText(f"错误：{_error_summary(message)}")
+        self._build_error_box(message).exec()
