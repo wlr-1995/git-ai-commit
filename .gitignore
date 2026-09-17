@@ -1,12 +1,8 @@
-__pycache__/
-*.pyc
-.pytest_cache/
-.venv/
-build/
-dist/
-*.spec
 node_modules/
 out/
+dist/
+build/*
+!build/icon.ico
 coverage/
 test-results/
 playwright-report/

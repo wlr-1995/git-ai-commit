@@ -13,3 +13,6 @@ foreach ($base in $bases) {
         Write-Host "未安装 $base"
     }
 }
+
+Write-Host '右键菜单已移除；便携目录（如 dist\win-unpacked）可直接删除。'
+Write-Host '用户配置与主题保留在 %USERPROFILE%\.git_ai_commit\，如需彻底清理可手动删除该目录。'

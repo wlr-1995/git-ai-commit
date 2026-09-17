@@ -1,0 +1,16 @@
+appId: com.xingqiong.git-ai-commit
+productName: AI 提交
+executableName: git-ai-commit
+copyright: Copyright (c) 2026
+directories:
+  output: dist
+  buildResources: build
+files:
+  - out/**/*
+  - package.json
+win:
+  target:
+    - target: dir
+      arch:
+        - x64
+  icon: build/icon.ico

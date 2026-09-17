@@ -1,17 +1,23 @@
 $ErrorActionPreference = 'Stop'
 
-$bases = @(
+$keys = @(
     'HKCU:\Software\Classes\Directory\shell\AIGitCommit\command',
     'HKCU:\Software\Classes\Directory\Background\shell\AIGitCommit\command'
 )
 
 $ok = $true
-foreach ($key in $bases) {
-    if (Test-Path $key) {
-        $cmd = (Get-ItemProperty -Path $key).'(default)'
+foreach ($key in $keys) {
+    if (-not (Test-Path $key)) {
+        Write-Host "MISS $key"
+        $ok = $false
+        continue
+    }
+    $cmd = (Get-ItemProperty -Path $key).'(default)'
+    $exe = ($cmd -split '"')[1]
+    if ($exe -and (Test-Path -LiteralPath $exe)) {
         Write-Host "OK   $key -> $cmd"
     } else {
-        Write-Host "MISS $key"
+        Write-Host "BAD  $key -> $cmd（exe 不存在）"
         $ok = $false
     }
 }

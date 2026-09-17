@@ -1,17 +1,15 @@
+param(
+    [string]$Dir = (Join-Path (Split-Path -Parent $PSScriptRoot) 'dist\win-unpacked')
+)
+
 $ErrorActionPreference = 'Stop'
 
-$projectRoot = Split-Path -Parent $PSScriptRoot
-$entry = Join-Path $projectRoot 'app\main.py'
-if (-not (Test-Path -LiteralPath $entry)) {
-    throw "找不到入口文件: $entry"
+$exe = Join-Path $Dir 'git-ai-commit.exe'
+if (-not (Test-Path -LiteralPath $exe)) {
+    throw "找不到 $exe。请先运行 npm run package，或用 -Dir 指向便携目录。"
 }
 
-$python = (Get-Command python.exe -ErrorAction SilentlyContinue).Source
-if (-not $python) { throw '找不到 python.exe，请先安装 Python 并加入 PATH' }
-$pythonw = Join-Path (Split-Path -Parent $python) 'pythonw.exe'
-if (-not (Test-Path -LiteralPath $pythonw)) { $pythonw = $python }
-
-$command = "`"$pythonw`" `"$entry`" `"%V`""
+$command = "`"$exe`" `"%V`""
 $bases = @(
     'HKCU:\Software\Classes\Directory\shell\AIGitCommit',
     'HKCU:\Software\Classes\Directory\Background\shell\AIGitCommit'
@@ -20,10 +18,11 @@ $bases = @(
 foreach ($base in $bases) {
     New-Item -Path $base -Force | Out-Null
     Set-ItemProperty -Path $base -Name '(default)' -Value 'AI 提交'
-    Set-ItemProperty -Path $base -Name 'Icon' -Value "`"$pythonw`""
+    Set-ItemProperty -Path $base -Name 'Icon' -Value "`"$exe`""
     New-Item -Path "$base\command" -Force | Out-Null
     Set-ItemProperty -Path "$base\command" -Name '(default)' -Value $command
 }
 
-Write-Host "已安装右键菜单。命令: $command"
-Write-Host "Windows 11 中请在「显示更多选项」里查看。"
+Write-Host '已安装右键菜单（免管理员，仅写入 HKCU）：'
+Write-Host "  $command"
+Write-Host 'Windows 11 中请在「显示更多选项」里查看。'

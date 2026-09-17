@@ -1,158 +1,151 @@
-# Git AI 提交
+# AI 提交
 
-在 Windows 资源管理器里右键一个文件夹，勾选要提交的改动，让 AI 根据 diff 生成提交信息，然后只提交勾选的文件。
+在资源管理器里右键任意 Git 仓库目录，勾选要提交的文件 → 让 AI 写提交信息 → 提交。顺手能看每个文件的 diff。
 
-## 功能简介
-
-- 右键文件夹 →「AI 提交」，自动定位该目录所属的 Git 仓库。
-- 列出所有未提交的变更，每项前显示状态字母（`M` 修改 / `A` 新增 / `D` 删除 / `R` 重命名 / `?` 未跟踪 / `!` 冲突）。
-- 默认只列出**已跟踪**文件的变更：未受版本控制的文件不显示（`ui.show_untracked` 可改成 `true`），也不会被提交。已跟踪文件默认勾选。
-- 调用 OpenAI 兼容接口，根据勾选文件的 diff 生成提交信息，可人工编辑后再提交。
-- **只提交勾选的文件**：其它已暂存但未勾选的内容会保持原样，不受影响。
-- AI 生成在后台线程执行，界面不会卡死；生成过程可「取消」。提交过程不可取消，以免隐藏已经发生的提交。
-
-## 环境要求
-
-- Windows
-- Python 3.12 或更高版本（已在 Python 3.13 上验证）
-- Git 已安装并加入 `PATH`
-- 一个 OpenAI 兼容的模型接口（例如本地 Ollama、各类云端服务）
+- 平台：Windows（Win10 / Win11）
+- 技术栈：Electron + TypeScript（核心逻辑零运行时依赖）
+- 免安装、免管理员：只往 `HKCU\Software\Classes` 写一个右键菜单项
+- **运行不需要本机装 Python / Node**（打包产物自带 Electron 运行时）
 
 ## 安装
 
-在项目根目录执行：
+```powershell
+# 1. 取源码后安装依赖并打包（需要 Node 20+ 与 Git）
+npm install
+npm run package          # 产出 dist\win-unpacked\（约 368 MB）
+
+# 2. 注册右键菜单（免管理员）
+pwsh -NoProfile -File install\install.ps1
+
+# 3. 校验注册与启动链路
+pwsh -NoProfile -File install\verify.ps1
+pwsh -NoProfile -File install\verify-launch.ps1
+```
+
+装好后在资源管理器里对仓库目录右键 → **AI 提交**（Windows 11 需先点「显示更多选项」）。
+`Directory` 与 `Directory\Background`（目录空白处右键）两处都会注册。
+
+便携目录可以整个拷到别处，再用 `install.ps1 -Dir "D:\Tools\git-ai-commit"` 指向它。
+
+### 卸载
 
 ```powershell
-python -m pip install -r requirements.txt
-pwsh -File install\install.ps1
+pwsh -NoProfile -File install\uninstall.ps1    # 移除右键菜单
 ```
 
-- `requirements.txt` 包含 `PySide6`、`requests`、`pytest`。
-- `install\install.ps1` 会在 **当前用户**（`HKCU`）下写入注册表，为「文件夹」和「文件夹空白处」注册右键菜单项「AI 提交」，**无需管理员权限**。
-- 安装后 Windows 11 需在右键菜单的「显示更多选项」里才能看到该条目（见「已知限制」）。
+便携目录直接删除即可。用户配置与主题在 `%USERPROFILE%\.git_ai_commit\`，需要彻底清理时手动删除该目录。
 
-入口命令为：
+### 实测数据（开发机 Win11，打包产物）
+
+| 指标 | 值 |
+|---|---|
+| 冷启动（首次） | 约 0.6 s |
+| 冷启动（之后） | 约 0.4 s |
+| 便携目录体积 | 约 368 MB |
+| 对照：旧 Python 版依赖 | PySide6 单独 632 MB（另加 Python 本体） |
+
+> 产物未做代码签名，拷到**其它**机器首次运行会有 SmartScreen 提示（本机不影响）。
+
+## 使用
 
 ```
-pythonw.exe "<项目路径>\app\main.py" "%V"
+┌──────────────────────────────────────────────────────────────┐
+│ «仓库名»                        C:\...\repo-path    分支 [main] │
+├───────────────────────┬──────────────────────────────────────┤
+│ 提交信息              │ README.md                            │
+│ [                   ] │ ──────────────────────────────────── │
+│ 变更列表  选中  F5 刷新│ @@ -1,2 +1,2 @@                     │
+│ 全部(A) 无(N) 已添加… │ +新增行            （淡绿）           │
+│ ┌───────────────────┐ │ -删掉的行          （淡红）           │
+│ │☑ README.md  … 已修改│ │                                     │
+│ └───────────────────┘ │                                      │
+│ ☐ 显示未受版本控制的文件│                                     │
+├───────────────────────┴──────────────────────────────────────┤
+│ [设置] [AI 生成] [取消]            提示…            [提交]   │
+│ 共 3 个变更 · 已选 2                                          │
+└──────────────────────────────────────────────────────────────┘
 ```
 
-## 界面
-
-窗口自上而下依次为：
-
-1. 仓库路径与**当前分支**（如 `分支：main`；游离 HEAD 时显示 `游离 HEAD (短提交号)`）
-2. **提交信息**编辑框
-3. **变更列表**（标题 `变更列表（F5 键刷新）：`）——表格列：`路径`（首列含勾选框）、`扩展名`、`状态`、`添加行数`、`删除行数`
-4. **选中：** 过滤行，可点击 `全部(A)`、`无(N)`、`已添加`、`已删除`、`已修改`。后三个是**累加勾选**：只勾选匹配项，不会取消你已经勾选的文件。
-5. **显示未受版本控制的文件(U)** 复选框：**默认不勾选**，未受版本控制的文件不出现在列表里（自然也不会被提交）；需要时勾选它才列出。
-6. 「设置」「AI 生成」「取消」「提交」按钮与底部状态栏
-
-即「提交信息」在上、「变更列表」在下，表格结构参考 TortoiseGit 的「检查修改」窗口。
-
-- 表格列尽量靠左排列：路径列固定初始宽度，其余列按内容收紧，右侧留白。
-- **黑白单色主题**：固定使用 Fusion 样式，外观全部取自 `app/ui/styles/` 下的 `.qss` 文件，不跟随 Windows 深色模式，系统开深色时界面依然是白底。整套界面只用黑、白与灰阶，不按语义上色（状态列不做逐项着色，「未版本控制」「已冲突」都靠文字本身分辨）。
-- 顶部信息有层级：仓库名加粗、路径灰字中间省略（悬停看全路径）、当前分支是灰色胶囊标签。
-- 变更列表是紧凑的框式列表（参考 TortoiseGit「检查修改」）：表头填充色条、斑马纹、网格线、行高 24px；过滤项是胶囊按钮，鼠标悬停有反馈。
-- 没有变更时表格区域显示「工作区干净」，被开关过滤掉时提示改勾选开关；底部状态栏显示「共 N 个变更 · 已选 M」。
-- 状态列使用中文：`已修改` / `已添加` / `已删除` / `已重命名` / `未版本控制` / `冲突`。
-- 行数列用一次 `git diff --numstat HEAD` 统计；**未跟踪文件不统计**（留空），二进制文件显示 `-`。
-- 样式是真实文件：`app/ui/styles/` 下每份 `.qss` 就是一套样式（`traditional.qss` 默认、`flat.qss` 扁平），往这个目录丢新的 `.qss` 就会出现在设置界面的样式下拉里（文件名就是样式名，首行可写 `/* 名称: 中文名 */` 指定显示名）。样式文件里 `url("...")` 按相对该文件解析；颜色必须只用灰阶。想回退就删掉那个 `.qss`，或在设置界面选回 `traditional`。间距刻度仍集中在 `app/ui/theme.py`，颜色只写在 `.qss` 里。
-- 勾选框由样式显式绘制（白底深灰描边，勾选后近黑填充 + 白色对勾）：Fusion 默认自绘的勾选框在白底上几乎看不见。对勾图形在 `app/ui/styles/icons/check.svg`。
-- 勾选框交互（`ChangesTable`）：**按下即切换**，不用等松开；命中区以方框为中心外扩到 26px（画出来约 17px），点偏几像素也算；**快速连点每次都会生效**——Qt 默认只在松开点正好落在方框内时才切换，而且会丢掉带双击标记的那一次按下，导致连点「丢失」。点勾选框同时选中该行并让表格获得焦点（随后 `A`/`N` 快捷键可用）。
-- 快捷键：`F5` 刷新；`A` / `N` / `U` 在表格获得焦点时生效（避免与提交信息输入框冲突）。
+- **勾选**：点勾选框切换；点行的其它位置 = 选中该行并在右侧显示它的 diff（不影响勾选）
+- **过滤**：`全部(A)` / `无(N)` 是全选 / 全不选；`已添加` / `已删除` / `已修改` 只**累加勾选**，不会取消别的勾选
+- **默认不显示未受版本控制的文件**（它们也不会被提交）；勾上开关才列出
+- **快捷键**：`F5` 刷新；表格聚焦时 `A` 全选 / `N` 全不选 / `U` 切换未跟踪开关；`Esc` 关闭弹层
+- **diff 面板**：加行淡绿、删行淡红、`@@` 行灰底；行首保留 `+` / `-` 前缀（不只靠颜色）；只显示文本前 `git.max_diff_lines` 行并在标题处标注「已截断」；二进制与超大未跟踪文件给出说明条而不是乱码
+- **AI 生成**：按勾选的改动调用 OpenAI 兼容接口（`/chat/completions`），结果填进输入框可继续编辑；生成中可取消；失败弹层提示且不清空你已写的内容
+- **提交**：只提交勾选的路径（重命名会自动带上旧路径，避免旧文件删除被留在暂存区）；提交不可取消，提交中关闭窗口会被拦下并提示「正在提交，请稍候…」
+- 所有 git / AI 调用都在主进程异步执行，界面不会卡住
 
 ## 配置
 
-配置文件位于：
+配置文件：`%USERPROFILE%\.git_ai_commit\config.json`（不存在时自动写入默认值；坏文件/缺键自动回退或补齐）
 
-```
-%USERPROFILE%\.git_ai_commit\config.json
-```
+| 键 | 默认值 | 说明 |
+|---|---|---|
+| `api.url` | `http://localhost:11434/v1` | OpenAI 兼容接口地址，会拼 `/chat/completions` |
+| `api.api_key` | `ollama` | 请求头 `Authorization: Bearer <key>` |
+| `api.model` | `qwen2.5-coder:7b` | 模型名 |
+| `api.prompt` | `""` | 自定义提示词；为空则按 `api.language` 生成默认提示词 |
+| `api.max_tokens` | `8192` | 大于 0 才随请求发送 |
+| `api.language` | `中文` | 默认提示词里要求的输出语言 |
+| `api.timeout` | `60` | 请求超时（秒），设置界面限制 1–600 |
+| `git.max_diff_lines` | `200` | 送给 AI 与 diff 面板共用的最大行数 |
+| `ui.window_width` / `ui.window_height` | `1100` / `640` | 开窗尺寸（最小 560×420） |
+| `ui.show_untracked` | `false` | 启动时是否显示未受版本控制的文件 |
+| `ui.style` | `light` | 主题 key（见下） |
+| `selection.checked_by_default` | `tracked` | 默认勾选策略：`tracked` / `all` / `none` |
 
-首次运行时若文件不存在，程序会按默认值自动创建。文件为 UTF-8 编码的 JSON，缺失的字段会自动用默认值补齐。字段说明：
+**API Key 是明文存在配置文件里的**：本机小工具，不做加密（加密材料同样在本机）。建议用权限受限的密钥。
 
-| 字段 | 默认值 | 含义 |
-| --- | --- | --- |
-| `api.url` | `http://localhost:11434/v1` | OpenAI 兼容接口的 base 地址，**必须以 `/v1` 结尾**。程序会请求 `{api.url}/chat/completions`。 |
-| `api.api_key` | `ollama` | 接口密钥。**以明文保存在配置文件里**（不做加密），建议使用权限受限的密钥。 |
-| `api.model` | `qwen2.5-coder:7b` | 使用的模型名。 |
-| `api.language` | `中文` | 未自定义提示词时，生成提交信息使用的语言。 |
-| `api.prompt` | `""`（空） | 自定义系统提示词。非空时优先于 `api.language`；留空则使用内置默认提示词。 |
-| `api.max_tokens` | `8192` | 生成的最大 token 数；`<= 0` 时该参数不发送。 |
-| `api.timeout` | `60` | 请求超时（秒）。 |
-| `git.max_diff_lines` | `200` | 送入模型的 diff 最大行数，超出部分会截断并标注省略行数。 |
-| `selection.checked_by_default` | `tracked` | 默认勾选策略：`tracked` = 已跟踪默认勾选、未跟踪默认不勾选；`all` = 全部勾选；`none` = 全部不勾选。 |
-| `ui.show_untracked` | `false` | 是否显示未受版本控制的文件。默认 `false`：列表里不出现它们（也不会被提交）；改成 `true` 则默认显示。界面上的「显示未受版本控制的文件(U)」复选框与它对应，只是临时开关。 |
-| `ui.style` | `traditional` | 界面样式，取 `app/ui/styles/<名字>.qss` 的文件名；设置界面里的样式下拉就是它。未知名字会回退 `traditional`。 |
-| `ui.window_width` | `720` | 主窗口初始宽度（像素）。 |
-| `ui.window_height` | `520` | 主窗口初始高度（像素）。 |
+### 主题
 
-示例：
+- 内置：`light`「克制工具（浅色）」
+- 外置：把任意 `.css` 丢进 `%USERPROFILE%\.git_ai_commit\themes\`，就是一个新主题；文件名（去 `.css`）即 key，首行写 `/* 名称: 我的主题 */` 决定下拉里的显示名；与内置同名时以外置为准
+- 设置界面里切换主题会**当场生效**，取消则还原，保存才写进配置
 
-```json
-{
-  "api": {
-    "url": "https://api.openai.com/v1",
-    "api_key": "sk-xxxx",
-    "model": "gpt-4o-mini",
-    "language": "中文",
-    "prompt": "",
-    "max_tokens": 8192,
-    "timeout": 60
-  },
-  "git": { "max_diff_lines": 200 },
-  "ui": { "window_width": 720, "window_height": 520, "show_untracked": false },
-  "selection": { "checked_by_default": "tracked" }
-}
-```
+CSS 变量见 `src/renderer/styles/tokens.css`（例如 `--accent`、`--add-bg`、`--row-height`）。
 
-> 注意：`api.url` 必须以 `/v1` 结尾，不要再自行拼接 `/chat/completions`。
+## 从旧 Python 版升级
 
-## 使用步骤
+- **配置与主题路径不变**，`config.json` 直接继续用
+- 旧的 `ui.style` 值 `traditional` 会自动回退到内置的 `light`（旧 `.qss` 样式文件不再使用，可删除）
+- 右键菜单会被新的 `install.ps1` 覆盖（同一个注册表键），无需先手动清理
+- 旧 Python 实现已从仓库移除，需要时可在 git 历史里查到
 
-1. 在资源管理器中右键点击一个 Git 仓库内的文件夹（或其空白处）。
-2. 选择「AI 提交」（Windows 11 在「显示更多选项」中）。
-3. 在变更列表里勾选要提交的文件；可用「选中：」过滤行（`全部(A)` / `无(N)` / `已添加` / `已删除` / `已修改`）批量勾选，用「显示未受版本控制的文件(U)」开关控制未受版本控制的文件是否显示（默认不显示），或按 `F5` 刷新列表。
-4. 点「设置」可切换界面样式（改一下就当场预览，取消会还原）并填写接口地址 / 模型名 / API Key / 超时；保存后写回配置文件，模型参数下次点「AI 生成」即生效。
-5. 点击「AI 生成」，等待后台生成提交信息（此过程可「取消」）。未配置 `api.url` 时会给出明确错误提示。
-6. 在「提交信息」框中按需编辑。
-7. 点击「提交」。**只有勾选的文件会被提交**，其它已暂存内容保持不变。
-
-若选择的目录不在任何 Git 仓库内，会弹出「该目录不是 Git 仓库」提示。
-
-## 卸载
+## 开发
 
 ```powershell
-pwsh -File install\uninstall.ps1
+npm install            # 依赖（postinstall 会下载 Electron 二进制）
+npm run dev            # 开发模式（渲染层热更新）
+npm test               # 单元测试（vitest：核心逻辑 + 界面纯逻辑）
+npm run typecheck      # tsc --noEmit
+npm run e2e            # 端到端（Playwright 驱动真实 Electron + 真临时仓库）
+npm run shots          # 抓三张界面截图到 %TEMP%\electron-shots\
+npm run package        # 打包便携目录
 ```
 
-该脚本会删除 `HKCU` 下注册的右键菜单项。配置文件 `%USERPROFILE%\.git_ai_commit\config.json` 不会被删除，可手动清理；Python 依赖可用 `python -m pip uninstall PySide6 requests` 移除。
+### 目录结构
 
-## 已知限制
-
-- **Windows 11**：右键菜单项位于「显示更多选项」（经典菜单）中，不会出现在精简菜单里。
-- v1 不提供 diff 预览、不提供 `git commit --amend`、不提供 `push`（计划在 v2）。
-- 只根据勾选文件的 diff 生成信息；一次只处理一个仓库。
-
-## 测试
-
-```powershell
-python -m pytest -v
+```
+src/
+  core/        git 子进程、状态解析、diff、AI 客户端、配置（纯逻辑，禁止 import electron）
+  shared/      三端共用的通道常量与类型（含渲染层要用的状态常量，零依赖）
+  main/        Electron 主进程：窗口、IPC 处理、主题扫描
+  preload/     contextBridge 白名单（渲染层拿不到 Node）
+  renderer/    界面：state.ts（纯函数）/ render.ts（DOM）/ components/ / styles/
+tests/
+  core/        移植自旧 Python 测试的核心行为测试
+  renderer/    界面纯逻辑测试
+  e2e/         Playwright 端到端
+install/       右键菜单安装/卸载/校验脚本
+docs/          设计文档与实施计划（含各里程碑的取舍与实测记录）
 ```
 
-覆盖配置读写、git 命令封装、变更解析、diff 采集与截断、仅提交勾选路径、AI 客户端以及后台 worker 等逻辑。
+### 说明
 
-## Windows / conda 的 PySide6 环境说明
+- 渲染层开了 `contextIsolation` + `sandbox`，所有能力都经 preload 白名单暴露；仓库路径先做「必须落在仓库内」校验，diff 一律用 `textContent` 写入
+- `GIT_AI_COMMIT_CONFIG` 环境变量可覆盖配置文件路径，仅供端到端测试隔离使用
+- `npm test` 的覆盖率门：`src/core` 行覆盖 ≥ 90%（当前 96%+）
 
-在 conda 基础环境（例如 `C:\Users\<你>\miniconda3`）中，conda 自带的 `Library\bin\icuuc.dll`（ICU 78，只导出带版本号的符号，如 `ucnv_open_78`）会遮蔽 Windows 系统自带的 `icuuc.dll`（导出不带版本号的 `ucnv_open` 等）。PySide6 的 `Qt6Core.dll` 依赖后者不带版本号的符号，于是 `import PySide6` 会抛出 `ImportError: DLL load failed ... (0xc0000139)`。
+## 许可与致谢
 
-程序已自动处理该问题：`app/bootstrap.py` 会在导入 PySide6 之前把系统 `System32` 注册为 DLL 搜索目录，从而让系统 ICU 优先命中。该逻辑在 `app/__init__.py` 中被触发，`app/main.py` 也会显式调用，因此产品和测试都能正常工作。
-
-如果仍遇到 DLL 加载问题，使用一个干净的独立虚拟环境是更彻底的做法，例如：
-
-```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -r requirements.txt
-```
+见 `THIRD-PARTY-NOTICES.md`。

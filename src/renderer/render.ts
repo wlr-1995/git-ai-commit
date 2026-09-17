@@ -43,6 +43,7 @@ function suffixOf(path: string): string {
 }
 
 export function render(state: UiState, elements: Elements, ctx: RenderContext): void {
+  document.title = `${ctx.repoName} — AI 提交`
   elements.repoName.textContent = ctx.repoName
   elements.repoName.title = ctx.repoPath
   elements.repoPath.textContent = ctx.repoPath

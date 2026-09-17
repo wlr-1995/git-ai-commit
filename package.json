@@ -13,6 +13,8 @@
     "coverage": "vitest run --coverage",
     "e2e": "electron-vite build && playwright test",
     "shots": "electron-vite build && node scripts/capture-screenshots.mjs",
+    "icon": "node scripts/make-icon.mjs",
+    "package": "electron-vite build && electron-builder --win --dir",
     "postinstall": "node node_modules/electron/install.js"
   },
   "devDependencies": {

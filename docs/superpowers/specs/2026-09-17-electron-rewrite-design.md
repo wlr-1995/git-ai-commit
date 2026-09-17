@@ -328,12 +328,11 @@ function parseDiff(text: string): DiffLine[]
 | 里程碑 | 内容 | 验收门 |
 |---|---|---|
 | M1 脚手架 + core | electron-vite/vitest/tsconfig 就位；`src/core` 全部实现；翻译测试 + 新增 core 测试 | **已完成**（2026-09-17）：`tests/core` 9 文件 96 用例全绿、`tsc --noEmit` 干净、core 行覆盖 96.6%；4 处变异检查（porcelain 偏移、numstat 花括号、readDiff 截断标记、diff 的 `###` 块）均如预期失败 |
-| M2 骨架 + 最小界面 | main/preload/renderer；列表、勾选、过滤、未跟踪开关、刷新、提交、空状态、状态栏、动作行；Playwright 启动冒烟 | 对真临时仓库跑通「勾选 → 提交」（E2E ②），`git log` 断言通过 |
-| M3 完整界面 | diff 面板、AI 生成 + 取消、设置弹层 + 主题、错误弹层、忙碌态、快捷键、窄窗折叠 | E2E ①③④⑤ 全绿 + 人工截图确认视觉；核心告一段落 |
+| M2 骨架 + 最小界面 | main/preload/renderer；列表、勾选、过滤、未跟踪开关、刷新、提交、空状态、状态栏、动作行；Playwright 启动冒烟 | **已完成**（2026-09-17）：E2E 8 条覆盖 ①②③④④b⑤⑤b⑥，真临时仓库上「勾选 → 提交」用 `git log` 断言通过 |
+| M3 完整界面 | diff 面板、AI 生成 + 取消、设置弹层 + 主题、错误弹层、忙碌态、快捷键、窄窗折叠 | **已完成**（2026-09-17）：`npm run shots` 三张截图逐张人工核对通过；期间修掉 5 个真实缺陷（见下方「实现期发现的问题」） |
 | M4 打包与切换 | electron-builder 便携目录；`install.ps1`/`uninstall.ps1`/`verify.ps1` 改指向 exe；README 重写；删除 Python 实现与测试；MIT 声明复核 | 卸旧菜单 → 跑新 `install.ps1` → 资源管理器右键「AI 提交」打开新窗口并能提交真实改动；`verify.ps1` 通过 |
 
 ## 10. 打包与分发
-
 - `electron-builder.yml`：`appId: com.xingqiong.git-ai-commit`、`productName: AI 提交`、`win.target: dir`（输出 `dist/win-unpacked/`）、`files` 只含构建产物、`asar: true`、图标 `build/icon.ico`
 - 目录内容：`AI 提交.exe` + `resources/app.asar` + Electron 运行时，约 220–260 MB
 - 右键菜单：`HKCU\Software\Classes\Directory\shell\AIGitCommit`
@@ -343,6 +342,19 @@ function parseDiff(text: string): DiffLine[]
   - 旧的 `pythonw.exe app\main.py` command 会被同键覆盖，天然完成升级；`uninstall.ps1` 删除整个 `AIGitCommit` 键
 - `verify.ps1`：检查注册表 command 指向的文件存在、打印结果
 - 升级：覆盖安装目录即可（无安装器）；`%USERPROFILE%\.git_ai_commit\config.json` 不动，配置与主题跨版本保留
+
+### 实现期发现的问题（M2/M3 期间修掉，均为设计盲区）
+
+| 现象 | 根因 | 处置 |
+|---|---|---|
+| 启动后打开了**项目目录**而不是被点选的仓库 | `electron . <dir>` 时 `argv[1]` 是应用目录本身 | `resolveStartPath` 用 `process.defaultApp` 跳过它（§4.4） |
+| 头部路径与被点选路径不一致（`C:/x` vs `C:\x`） | git `--show-toplevel` 在 Windows 返回正斜杠 | 拿到后 `normalize()`（对齐 Qt 版的 `os.path.normpath`） |
+| 渲染层构建失败：`node:child_process` 被打进浏览器包 | 渲染层 import 了 `core/repo` 的**值**（状态常量/中文名） | 抽出零依赖的 `src/shared/changes.ts`，core 与渲染层共用 |
+| 表格被空状态整片盖住 | `[hidden]` 的 `display: none` 被 `.empty-state { display: flex }` 压过 | 补 `.empty-state[hidden] { display: none }` |
+| 默认窗口下右栏 diff 一直折叠 | 默认宽 720px 小于窄窗阈值 820px | 默认改 1100×640、阈值改 760px（§4.4/§6.1） |
+| 路径列宽度塌成 0、状态列显示「已修…」 | `td { max-width: 0 }` + 自动表格布局 + 左栏 380px 装不下 5 列 | 改 `table-layout: fixed` + 显式列宽 + 左栏默认 560px（最小 420px） |
+| 点行只切换了勾选、diff 不出现 | 点击命中了行内的 checkbox（事件绑在 `td`） | 点击事件绑到 `tr`，`event.target === checkbox` 时跳过 |
+| 网络错误只显示 `fetch failed` | Node 的 fetch 把真实原因放在 `error.cause` | 错误文案优先取 `cause.message` |
 
 ## 11. 风险
 
@@ -361,7 +373,6 @@ function parseDiff(text: string): DiffLine[]
 | 现有 `.qss` 样式文件与 `ui.style` 旧值 | `traditional` 映射为 `light`，未知值回退 `light`；主题机制改为 CSS，旧的 `.qss` 文件在 M4 随 Python 版删除 |
 
 ## 12. 验收标准
-
 1. 资源管理器右键仓库目录 → 窗口 1s 内出现，显示仓库名、路径、分支与变更列表
 2. 勾选/过滤/快捷键/未跟踪开关行为与现有一致（含「累加勾选」与「默认勾选已跟踪」）
 3. 点某行右栏显示该文件 diff：加行淡绿、删行淡红、`@@` 灰底、行号 + `+/-` 前缀；超限/二进制/未跟踪新增文件给提示条

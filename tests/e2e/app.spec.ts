@@ -56,6 +56,7 @@ test("① 启动即列出变更与分支", async () => {
   await expect(window.locator("#branch")).toHaveText("main")
   await expect(window.locator("#repo-name")).toHaveText(/gac-e2e-/)
   await expect(window.locator("#repo-path")).toHaveText(repo)
+  await expect(window).toHaveTitle(/gac-e2e-.* — AI 提交/)
   await expect(window.locator("#empty-state")).toBeHidden()
   await expect(window.locator("#status")).toContainText("共 1 个变更 · 已选 1")
   await expect(window.locator("#btn-commit")).toBeDisabled()
