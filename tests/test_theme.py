@@ -2,7 +2,6 @@ import re
 from pathlib import Path
 
 import pytest
-from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import QApplication
 
 from app.core import repo as repo_status
@@ -119,28 +118,11 @@ def test_light_qss_targets_white(qapp):
     assert "QPushButton#primaryButton" in qss
 
 
-def test_tokens_stay_on_scale(qapp):
+def test_spaces_stay_on_scale(qapp):
     spaces = (theme.SPACE_XS, theme.SPACE_SM, theme.SPACE_MD, theme.SPACE_LG, theme.SPACE_XL)
 
     assert spaces == tuple(sorted(spaces))
     assert all(value % 4 == 0 for value in spaces)
-
-
-def test_light_palette_is_white(qapp):
-    palette = theme.light_palette()
-
-    assert palette.color(QPalette.ColorRole.Window).name() == "#ffffff"
-    assert palette.color(QPalette.ColorRole.Base).name() == "#ffffff"
-    assert palette.color(QPalette.ColorRole.WindowText).name() == "#1f1f1f"
-    assert palette.color(QPalette.ColorRole.Text).lightness() < 80
-    assert palette.color(QPalette.ColorRole.Button).lightness() > 200
-
-
-def test_light_palette_disabled_text_is_grey(qapp):
-    palette = theme.light_palette()
-    disabled = palette.color(QPalette.ColorGroup.Disabled, QPalette.ColorRole.ButtonText)
-
-    assert disabled.name() == "#9e9e9e"
 
 
 def test_main_applies_light_theme(monkeypatch):
@@ -268,3 +250,51 @@ def test_min_table_height_follows_style(styled_window):
             window.changes_table.minimumHeight()
             == expected_row * theme.TABLE_MIN_VISIBLE_ROWS + theme.TABLE_MIN_HEIGHT_EXTRA
         )
+
+
+def test_theme_module_has_no_color_literals(qapp):
+    """颜色只活在 .qss 里：theme.py 不得出现 #rrggbb。"""
+    source = Path(theme.__file__).read_text(encoding="utf-8")
+
+    assert not re.search(r"#[0-9a-fA-F]{6}", source)
+
+
+def test_window_renders_white(qapp, styled_window):
+    window = styled_window("traditional")
+
+    image = window.grab().toImage()
+    assert image.pixelColor(5, 5).name() == "#ffffff"
+
+
+def test_combo_popup_is_monochrome(qapp, styled_window):
+    """删掉调色板后，下拉弹窗的选中色必须来自样式，不能漏出 Fusion 蓝。"""
+    from PySide6.QtWidgets import QComboBox
+
+    styled_window("traditional")
+    combo = QComboBox()
+    combo.addItems(["传统框感", "扁平"])
+    combo.resize(220, 28)
+    combo.show()
+    combo.setCurrentIndex(0)
+    combo.showPopup()
+    qapp.processEvents()
+
+    view = combo.view()
+    image = view.grab().toImage()
+    saturated = []
+    for y in range(image.height()):
+        for x in range(image.width()):
+            color = image.pixelColor(x, y)
+            if max(color.red(), color.green(), color.blue()) - min(
+                color.red(), color.green(), color.blue()
+            ) > 60:
+                saturated.append((x, y, color.name()))
+    assert saturated == [], f"弹窗里有彩色像素：{saturated[:5]}"
+
+    rect = view.visualRect(view.model().index(0, 0))
+    # offscreen 下弹窗不按内容宽度调整，visualRect 可能比抓到的图像宽，取样点夹回图内。
+    sample_x = min(rect.right(), image.width() - 1) - 4
+    assert image.pixelColor(sample_x, rect.center().y()).name() == "#ededed"
+
+    combo.hidePopup()
+    combo.close()

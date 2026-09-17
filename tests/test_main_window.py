@@ -67,17 +67,26 @@ def _send_click(viewport, x, y, qapp, double=False):
     qapp.processEvents()
 
 
-def _indicator_box(window):
-    """从渲染结果里量出勾选框的左右边界与中心行。
+def _indicator_border_lightness() -> int:
+    """勾选框描边的灰度：从样式文件里读，避免和样式脱节。"""
+    import re
 
-    只认勾选框描边的灰度（``TEXT_MUTED`` 附近），避免把路径文字的笔画当成勾选框。
-    """
     from PySide6.QtGui import QColor
 
+    match = re.search(
+        r"QCheckBox::indicator[^{]*\{[^}]*border:\s*1px solid (#[0-9a-fA-F]{6})",
+        theme.load_stylesheet(),
+    )
+    assert match, "样式里找不到勾选框描边色"
+    return QColor(match.group(1)).lightness()
+
+
+def _indicator_box(window):
+    """从渲染结果里量出勾选框的左右边界与中心行。"""
     table = window.changes_table
     row = table.visualItemRect(table.item(0, 0))
     image = table.viewport().grab().toImage()
-    border = QColor(theme.TEXT_MUTED).lightness()
+    border = _indicator_border_lightness()
     xs = sorted(
         x
         for x in range(0, 30)
@@ -438,7 +447,7 @@ def test_empty_state_explains_clean_and_filtered(qapp, tmp_path, monkeypatch):
     assert "未显示任何文件" in window.empty_state.text()
 
 
-def test_numeric_columns_right_aligned_and_status_monochrome(qapp, tmp_path, monkeypatch):
+def test_numeric_columns_are_right_aligned(qapp, tmp_path, monkeypatch):
     window = _make_window(tmp_path, monkeypatch)
     window.show_untracked_check.setChecked(True)
     window._on_changes_loaded(_changes_fixture(), {"a.txt": (2, 1)})
@@ -446,12 +455,6 @@ def test_numeric_columns_right_aligned_and_status_monochrome(qapp, tmp_path, mon
 
     for column in (3, 4):
         assert table.item(0, column).textAlignment() & int(Qt.AlignmentFlag.AlignRight)
-
-    rows = {table.item(row, 0).text(): row for row in range(table.rowCount())}
-    # 黑白两色：状态只用正文色与弱化灰，不再按语义上色
-    assert table.item(rows["a.txt"], 2).foreground().color().name() == theme.TEXT
-    assert table.item(rows["gone.txt"], 2).foreground().color().name() == theme.TEXT
-    assert table.item(rows["new.txt"], 2).foreground().color().name() == theme.TEXT_MUTED
 
 
 def test_busy_disables_commit_and_keeps_start_text(qapp, tmp_path, monkeypatch):

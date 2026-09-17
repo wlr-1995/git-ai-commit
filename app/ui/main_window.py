@@ -6,7 +6,7 @@ import unicodedata
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QItemSelectionModel, QPoint, QRect, Qt
-from PySide6.QtGui import QColor, QFontMetrics, QKeySequence, QShortcut
+from PySide6.QtGui import QFontMetrics, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -573,7 +573,7 @@ class MainWindow(QMainWindow):
         self._update_summary()
 
     def _fill_row(self, row: int, change: repo.FileChange, state, checked_default: str) -> None:
-        """填一行：首列勾选框 + 路径，其余列按语义上色、数字列右对齐。"""
+        """填一行：首列勾选框 + 路径，数字列右对齐。颜色与字重由样式表决定。"""
         path_item = QTableWidgetItem(change.path)
         path_item.setData(Qt.ItemDataRole.UserRole, change)
         path_item.setToolTip(change.path)
@@ -596,14 +596,10 @@ class MainWindow(QMainWindow):
         added, deleted = self._stats.get(change.path, (None, None))
 
         suffix_item = QTableWidgetItem(Path(change.path).suffix)
-        suffix_item.setForeground(QColor(theme.TEXT_MUTED))
         suffix_item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
 
         status_item = QTableWidgetItem(repo.STATUS_TEXT.get(change.status, change.status))
-        status_item.setForeground(theme.status_color(change.status))
         status_item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-        if theme.status_is_bold(change.status):
-            status_item.setFont(theme.section_font())
 
         cells = (
             suffix_item,
@@ -613,10 +609,7 @@ class MainWindow(QMainWindow):
         )
         for offset, item in enumerate(cells, start=1):
             if offset in _RIGHT_ALIGNED_COLUMNS:
-                item.setTextAlignment(
-                    Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-                )
-                item.setForeground(QColor(theme.TEXT_MUTED))
+                item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.changes_table.setItem(row, offset, item)
 
     def _on_refresh_failed(self, message: str) -> None:
@@ -655,11 +648,9 @@ class MainWindow(QMainWindow):
 
     # --- 汇总与选择 ---
 
-    def _set_status(self, text: str, error: bool = False) -> None:
-        """状态栏文字。单色方案下「出错」用正文色 + 加粗，不用红色。"""
+    def _set_status(self, text: str) -> None:
+        """状态栏文字。单色方案下不做颜色/字重区分，出错另有错误对话框。"""
         self.status.setText(text)
-        font = theme.section_font() if error else theme.base_font()
-        self.status.setFont(font)
 
     def _update_summary(self) -> None:
         """统一刷新状态栏、空状态与按钮可用性，避免各处各写一套。"""
@@ -836,5 +827,5 @@ class MainWindow(QMainWindow):
         return box
 
     def _error(self, message: str) -> None:
-        self._set_status(f"错误：{_error_summary(message)}", error=True)
+        self._set_status(f"错误：{_error_summary(message)}")
         self._build_error_box(message).exec()

@@ -1,7 +1,7 @@
-"""白色主题：QSS 从样式文件读取，这里只放 QSS 管不了的东西与装载器。
+"""白色主题：颜色/字体都在 ``styles/*.qss``，这里只放装载器与窗口图标。
 
 - 样式是真实文件：``app/ui/styles/*.qss``，一份文件一套样式，目录扫描即可发现。
-- 样式文件里写**字面值**（``#1f1f1f``、``8px``），``url("...")`` 用相对本文件的路径。
+- 样式文件里直接写颜色与尺寸字面值，``url("...")`` 用相对本文件的路径。
 - Windows 11 默认样式会跟随系统深色模式；这里固定 Fusion，保证界面始终是白底。
 """
 
@@ -9,7 +9,7 @@ import re
 from pathlib import Path
 
 from PySide6.QtCore import QRect, Qt
-from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPalette, QPixmap
+from PySide6.QtGui import QFont, QIcon, QPainter, QPixmap
 
 # --- 样式文件 ----------------------------------------------------------------
 
@@ -35,55 +35,9 @@ SPACE_MD = 12
 SPACE_LG = 16
 SPACE_XL = 24
 
-#: 圆角半径。
-RADIUS = 6
-
 #: 主窗口内容边距与区块间距（方向 B：传统 → 更紧凑）。
 WINDOW_MARGINS = (SPACE_MD, SPACE_SM, SPACE_MD, SPACE_XS)
 LAYOUT_SPACING = SPACE_SM
-
-#: 中性色。
-BACKGROUND = "#ffffff"
-SURFACE = "#f6f6f6"
-SURFACE_HOVER = "#eeeeee"
-SURFACE_PRESSED = "#e3e3e3"
-SURFACE_DISABLED = "#fafafa"
-BORDER = "#d9d9d9"
-BORDER_STRONG = "#c4c4c4"
-GRID = "#e6e6e6"
-HEADER_BG = "#f2f2f2"
-ZEBRA = "#f7f7f7"
-
-#: 文字。
-TEXT = "#1f1f1f"
-TEXT_MUTED = "#6b6b6b"
-TEXT_DISABLED = "#9e9e9e"
-TEXT_INVERSE = "#ffffff"
-
-#: 单色强调：整套界面只用黑、白与灰阶，「强调」用近黑而不是彩色。
-INK = "#1f1f1f"
-INK_HOVER = "#000000"
-INK_PRESSED = "#000000"
-INK_SOFT = "#ededed"
-INK_SOFT_BORDER = "#d9d9d9"
-
-#: 状态只用灰阶区分（未跟踪弱化），需要立刻处理的状态用加粗而不是颜色。
-STATUS_COLORS = {
-    "modified": TEXT,
-    "added": TEXT,
-    "deleted": TEXT,
-    "renamed": TEXT,
-    "untracked": TEXT_MUTED,
-    "conflicted": TEXT,
-}
-
-#: 需要立刻处理的状态：加粗突出，避免引入颜色。
-BOLD_STATUSES = frozenset({"conflicted"})
-
-#: 界面字体：中文优先微软雅黑 UI，回退到雅黑 / Segoe UI。
-FONT_FAMILIES = ("Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI")
-FONT_SIZE = 9
-FONT_SIZE_SMALL = 8
 
 #: 表格最小高度：至少露出这么多整行，再加一点余量，避免最后一行被截成半行。
 TABLE_MIN_VISIBLE_ROWS = 4
@@ -157,66 +111,6 @@ def apply_style(app, style: str) -> None:
 # --- QSS 管不了的部分 --------------------------------------------------------
 
 
-def base_font() -> QFont:
-    """界面基础字体（微软雅黑 UI）。"""
-    font = QFont()
-    font.setFamilies(list(FONT_FAMILIES))
-    font.setPointSize(FONT_SIZE)
-    return font
-
-
-def section_font() -> QFont:
-    """区块标题：同族、加粗半档，用于建立层级而不是靠加大字号。"""
-    font = base_font()
-    font.setWeight(QFont.Weight.DemiBold)
-    return font
-
-
-def ink_color() -> QColor:
-    return QColor(INK)
-
-
-def status_color(status: str) -> QColor:
-    """状态文字色：单色方案下只有正文色与弱化灰，未知状态回退正文色。"""
-    return QColor(STATUS_COLORS.get(status, TEXT))
-
-
-def status_is_bold(status: str) -> bool:
-    """需要立刻处理的状态用加粗表达（不引入颜色）。"""
-    return status in BOLD_STATUSES
-
-
-def light_palette() -> QPalette:
-    """白色主题调色板（Fusion 样式下对全部控件生效）。"""
-    palette = QPalette()
-    for role, value in (
-        (QPalette.ColorRole.Window, BACKGROUND),
-        (QPalette.ColorRole.WindowText, TEXT),
-        (QPalette.ColorRole.Base, BACKGROUND),
-        (QPalette.ColorRole.AlternateBase, ZEBRA),
-        (QPalette.ColorRole.Text, TEXT),
-        (QPalette.ColorRole.Button, SURFACE),
-        (QPalette.ColorRole.ButtonText, TEXT),
-        (QPalette.ColorRole.BrightText, TEXT_INVERSE),
-        (QPalette.ColorRole.Highlight, INK),
-        (QPalette.ColorRole.HighlightedText, TEXT_INVERSE),
-        (QPalette.ColorRole.Link, INK),
-        (QPalette.ColorRole.LinkVisited, INK),
-        (QPalette.ColorRole.ToolTipBase, BACKGROUND),
-        (QPalette.ColorRole.ToolTipText, TEXT),
-        (QPalette.ColorRole.PlaceholderText, TEXT_DISABLED),
-    ):
-        palette.setColor(role, QColor(value))
-
-    for role in (
-        QPalette.ColorRole.WindowText,
-        QPalette.ColorRole.Text,
-        QPalette.ColorRole.ButtonText,
-    ):
-        palette.setColor(QPalette.ColorGroup.Disabled, role, QColor(TEXT_DISABLED))
-    return palette
-
-
 def app_icon() -> QIcon:
     """程序内绘制的窗口图标，避免引入二进制资源。"""
     size = 64
@@ -225,14 +119,14 @@ def app_icon() -> QIcon:
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
     painter.setPen(Qt.PenStyle.NoPen)
-    painter.setBrush(ink_color())
+    painter.setBrush(Qt.GlobalColor.black)
     painter.drawRoundedRect(QRect(2, 2, size - 4, size - 4), 14, 14)
     font = QFont()
-    font.setFamilies(list(FONT_FAMILIES))
+    font.setFamilies(["Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI"])
     font.setPointSize(24)
     font.setWeight(QFont.Weight.Bold)
     painter.setFont(font)
-    painter.setPen(QColor(TEXT_INVERSE))
+    painter.setPen(Qt.GlobalColor.white)
     painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, "AI")
     painter.end()
     return QIcon(pixmap)
@@ -241,7 +135,5 @@ def app_icon() -> QIcon:
 def apply_light_theme(app, style: str = DEFAULT_STYLE) -> None:
     """把应用固定为白色主题（在 QApplication 创建后立即调用）。"""
     app.setStyle("Fusion")
-    app.setFont(base_font())
-    app.setPalette(light_palette())
     apply_style(app, style)
     app.setWindowIcon(app_icon())
