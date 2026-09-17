@@ -99,13 +99,15 @@ def apply_style(self, style: str) -> None:
 class SettingsDialog(QDialog):
     stylePreview = Signal(str)          # 预览样式变更，参数为样式 key
 
-    def __init__(self, config: dict, parent=None) -> None: ...
+    def __init__(self, config: dict, on_save=None, parent=None) -> None: ...
     def values(self) -> dict:
         """{"api": {"url":…, "model":…, "api_key":…, "timeout":…},
             "ui": {"style": <key>}}"""
     def current_style(self) -> str: ...  # 当前下拉选中的样式 key
+    def original_style(self) -> str: ... # 打开时配置里的样式（取消时还原用）
 ```
 
+- **保存走注入的回调**：`on_save(values) -> str | None`，返回错误文案时对话框**不关闭**（对应 §6 的「写盘失败保留用户输入」），返回 `None` 才 `accept()`。对话框自己不碰 `core.config`
 - 只读入参 `config` 的副本，不改原字典
 - 未知样式（配置文件里写了一个已被删除的样式名）→ 下拉回退到 `theme.DEFAULT_STYLE` 并选中它
 - 不 import `main_window`，不 import `QApplication`
