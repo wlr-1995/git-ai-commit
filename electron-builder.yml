@@ -8,6 +8,13 @@ directories:
 files:
   - out/**/*
   - package.json
+# 便携交付：把右键菜单装/卸脚本放到 exe 同级，拷到别的电脑后双击 cmd 即可
+extraFiles:
+  - from: install
+    to: .
+    filter:
+      - "*.ps1"
+      - "*.cmd"
 win:
   target:
     - target: dir

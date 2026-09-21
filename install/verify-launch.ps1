@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$Repo = (Get-Location).Path,
     [int]$TimeoutSeconds = 25
 )

@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 
 $bases = @(
     'HKCU:\Software\Classes\Directory\shell\AIGitCommit',

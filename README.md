@@ -9,6 +9,8 @@
 
 ## 安装
 
+### 本机（从源码）
+
 ```powershell
 # 1. 取源码后安装依赖并打包（需要 Node 20+ 与 Git）
 npm install
@@ -22,10 +24,18 @@ pwsh -NoProfile -File install\verify.ps1
 pwsh -NoProfile -File install\verify-launch.ps1
 ```
 
+### 拷到别的电脑
+
+`dist\win-unpacked\` 就是那个「便携目录」。把它**整个目录**拷过去（放哪都行，如 `D:\Tools\git-ai-commit\`），
+里面已经带了 `安装右键菜单.cmd` / `卸载右键菜单.cmd`，**双击「安装右键菜单.cmd」**即可 —— 免管理员，只写当前用户的注册表。
+
+- 别只拷 exe：它依赖同目录的 dll、`resources\`、`locales\`、`version` 等（整个目录 368 MB）
+- 目标机器只要有 **Git** 在 PATH 里就行，不需要装 Node / Python
+- 目录挪过位置后要**重新双击一次**（注册表里存的是绝对路径）
+- 不带 cmd 的场合（如脚本部署）：`powershell -NoProfile -File install.ps1 -Dir "D:\Tools\git-ai-commit"`
+
 装好后在资源管理器里对仓库目录右键 → **AI 提交**（Windows 11 需先点「显示更多选项」）。
 `Directory` 与 `Directory\Background`（目录空白处右键）两处都会注册。
-
-便携目录可以整个拷到别处，再用 `install.ps1 -Dir "D:\Tools\git-ai-commit"` 指向它。
 
 ### 卸载
 
