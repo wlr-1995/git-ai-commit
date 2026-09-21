@@ -40,6 +40,20 @@ export function deepMerge<T extends Record<string, unknown>>(base: T, override: 
   return result as T
 }
 
+/**
+ * 旧 Python 版的默认开窗是 720×520；Electron 版左右分栏需要更宽（1100×640），
+ * 否则默认就落进窄窗形态、右栏 diff 被折叠。
+ *
+ * 只在窗口尺寸**恰好等于旧默认值**时升级：用户自己改过的尺寸（哪怕更小）保持不动。
+ */
+function migrateLegacyDefaults(config: AppConfig): AppConfig {
+  if (config.ui.window_width === 720 && config.ui.window_height === 520) {
+    config.ui.window_width = DEFAULT_CONFIG.ui.window_width
+    config.ui.window_height = DEFAULT_CONFIG.ui.window_height
+  }
+  return config
+}
+
 /** 读取配置；文件不存在则写出默认配置。坏文件回退默认值。 */
 export function loadConfig(path: string = CONFIG_FILE): AppConfig {
   if (!existsSync(path)) {
@@ -50,7 +64,7 @@ export function loadConfig(path: string = CONFIG_FILE): AppConfig {
   try {
     const parsed: unknown = JSON.parse(readFileSync(path, "utf8"))
     if (!isPlainObject(parsed)) return structuredClone(DEFAULT_CONFIG)
-    return deepMerge(structuredClone(DEFAULT_CONFIG), parsed) as AppConfig
+    return migrateLegacyDefaults(deepMerge(structuredClone(DEFAULT_CONFIG), parsed) as AppConfig)
   } catch {
     return structuredClone(DEFAULT_CONFIG)
   }

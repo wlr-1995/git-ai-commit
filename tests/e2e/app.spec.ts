@@ -179,6 +179,21 @@ test("⑤b 未跟踪文件显示新增内容与说明行", async () => {
   await app.close()
 })
 
+test("⑦ 旧版配置（720×520 + traditional）仍以分栏形态打开", async () => {
+  const repo = makeRepo()
+  const configFile = makeConfig({ ui: { window_width: 720, window_height: 520, style: "traditional" } })
+  const app = await launchApp({ repo, configFile })
+  const window = await app.firstWindow()
+  await window.waitForSelector("#changes-body tr")
+
+  // 旧默认尺寸被升级 → 不是窄窗形态；未知样式回退内置浅色
+  const narrow = await window.evaluate(() => document.getElementById("app")?.classList.contains("narrow"))
+  expect(narrow).toBe(false)
+  await expect(window.locator("#diff-empty")).toBeVisible()
+
+  await app.close()
+})
+
 test("⑥ 不是 git 仓库时报错并以非 0 退出", async () => {
   const dir = mkdtempSync(join(tmpdir(), "gac-notrepo-"))
   const app = await launchApp({ repo: dir, configFile: makeConfig(), noDialog: true })

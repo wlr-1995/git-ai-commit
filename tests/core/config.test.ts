@@ -57,6 +57,22 @@ describe("loadConfig", () => {
     expect(loadConfig(cfgFile).api.model).toBe(DEFAULT_CONFIG.api.model)
   })
 
+  it("旧版默认窗口尺寸被升级到新版默认", () => {
+    const cfgFile = join(makeTempDir(), "config.json")
+    writeFileSync(cfgFile, JSON.stringify({ ui: { window_width: 720, window_height: 520 } }), "utf8")
+    const cfg = loadConfig(cfgFile)
+    expect(cfg.ui.window_width).toBe(DEFAULT_CONFIG.ui.window_width)
+    expect(cfg.ui.window_height).toBe(DEFAULT_CONFIG.ui.window_height)
+  })
+
+  it("用户自定义的窗口尺寸不被改动", () => {
+    const cfgFile = join(makeTempDir(), "config.json")
+    writeFileSync(cfgFile, JSON.stringify({ ui: { window_width: 900, window_height: 700 } }), "utf8")
+    const cfg = loadConfig(cfgFile)
+    expect(cfg.ui.window_width).toBe(900)
+    expect(cfg.ui.window_height).toBe(700)
+  })
+
   it("旧配置的 traditional 样式键被保留（映射由主题层负责）", () => {
     const cfgFile = join(makeTempDir(), "config.json")
     writeFileSync(cfgFile, JSON.stringify({ ui: { style: "traditional" } }), "utf8")

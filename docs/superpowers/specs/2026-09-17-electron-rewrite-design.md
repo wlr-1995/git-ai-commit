@@ -355,6 +355,13 @@ function parseDiff(text: string): DiffLine[]
 | 路径列宽度塌成 0、状态列显示「已修…」 | `td { max-width: 0 }` + 自动表格布局 + 左栏 380px 装不下 5 列 | 改 `table-layout: fixed` + 显式列宽 + 左栏默认 560px（最小 420px） |
 | 点行只切换了勾选、diff 不出现 | 点击命中了行内的 checkbox（事件绑在 `td`） | 点击事件绑到 `tr`，`event.target === checkbox` 时跳过 |
 | 网络错误只显示 `fetch failed` | Node 的 fetch 把真实原因放在 `error.cause` | 错误文案优先取 `cause.message` |
+| 旧配置（Python 版默认 720×520）下右栏默认折叠 | `ui.window_width/height` 是老默认值，覆盖了 Electron 版更宽的默认 | `loadConfig` 只在尺寸**恰好等于旧默认 720×520** 时升级到 1100×640；用户自定义尺寸不动（E2E ⑦ 覆盖） |
+
+### 历史遗留（已知，不影响功能）
+
+- 提交 `729a831「更新 tracked」` 是一次**误提交**：E2E 首次运行时（argv 修复前）应用把项目仓库当成了目标仓库，测试里的「提交」动作把当时 WIP 的 6 个文件提交进了本项目。其内容已被后续提交覆盖为最终版本（M1 的 core 全部实现 + 112 单元测试 + 9 条 E2E 均在当前树上通过）。
+- 尝试用 `git rebase` 剔除该提交会让 `src/core/{config,types,repo}.ts` 回退（丢掉 `GIT_AI_COMMIT_CONFIG` 覆盖与 `shared/changes` 重构），已按「重写前后工作树逐字节一致」的校验及时发现并回滚，因此**保留该提交**。
+- 教训：端到端测试必须用**独立临时仓库**（现已如此），且启动参数解析要能被测试覆盖（`process.defaultApp` 分支）。
 
 ## 11. 风险
 
