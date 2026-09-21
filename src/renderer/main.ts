@@ -291,6 +291,10 @@ function bind(): void {
     if (event.key === "F5") {
       event.preventDefault()
       void refresh()
+    } else if (event.ctrlKey && event.key === ",") {
+      // 设置已弱化为顶栏图标，用系统习惯快捷键补齐可达性；已有弹层时不叠加
+      event.preventDefault()
+      if (!document.querySelector(".modal-backdrop")) void openSettings()
     } else if (event.key === "Escape") {
       elements.diffPanel.classList.remove("diff-open")
     }

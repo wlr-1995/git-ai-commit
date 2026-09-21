@@ -73,6 +73,36 @@ body {
   white-space: nowrap;
 }
 
+/* 设置：窗口级次级工具，静默到 hover / 聚焦才显形 */
+.icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-muted);
+}
+
+.icon-button svg {
+  display: block;
+}
+
+.icon-button:hover:not(:disabled) {
+  background: var(--surface-muted);
+  border-color: var(--border);
+  color: var(--text);
+}
+
+.icon-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  color: var(--text);
+}
+
 /* 主体 */
 .app-body {
   display: grid;

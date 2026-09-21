@@ -150,6 +150,28 @@ test("④b 接口地址为空时保存禁用且给出提示", async () => {
   await app.close()
 })
 
+test("④c 设置入口在顶栏、动作行不再有它，Ctrl+, 也能打开", async () => {
+  const repo = makeRepo()
+  const app = await launchApp({ repo, configFile: makeConfig() })
+  const window = await app.firstWindow()
+  await window.waitForSelector("#changes-body tr")
+
+  await expect(window.locator(".app-header #btn-settings")).toBeVisible()
+  await expect(window.locator(".actions #btn-settings")).toHaveCount(0)
+  await expect(window.locator("#btn-settings")).toHaveAttribute("aria-label", "设置")
+
+  await window.keyboard.press("Control+,")
+  await expect(window.locator("#settings-save")).toBeVisible()
+
+  // 弹层已开时再按一次不应叠加出第二个弹层
+  await window.keyboard.press("Control+,")
+  await expect(window.locator(".modal-backdrop")).toHaveCount(1)
+  await window.keyboard.press("Escape")
+  await expect(window.locator(".modal-backdrop")).toHaveCount(0)
+
+  await app.close()
+})
+
 test("⑤ 点某行在右栏显示 diff", async () => {
   const repo = makeRepo()
   const app = await launchApp({ repo, configFile: makeConfig() })

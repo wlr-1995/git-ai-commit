@@ -20,6 +20,18 @@
         </div>
         <span class="hint">分支</span>
         <span id="branch" class="branch-chip"></span>
+        <button id="btn-settings" class="icon-button" type="button" title="设置（Ctrl+,）" aria-label="设置">
+          <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+            <g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+              <path d="M2.5 5.5h11" />
+              <path d="M2.5 10.5h11" />
+            </g>
+            <g fill="currentColor">
+              <circle cx="10.5" cy="5.5" r="2" />
+              <circle cx="5.5" cy="10.5" r="2" />
+            </g>
+          </svg>
+        </button>
       </header>
 
       <main class="app-body">
@@ -74,7 +86,6 @@
       </main>
 
       <div class="actions">
-        <button id="btn-settings">设置</button>
         <button id="btn-generate">AI 生成</button>
         <button id="btn-cancel" disabled>取消</button>
         <span id="action-hint" class="hint"></span>
