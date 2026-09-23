@@ -1122,33 +1122,12 @@ git commit -m "feat(ui): WinMerge path field in settings"
 
 **Files:**
 - Modify: `src/main/index.ts`（`app.on("will-quit")`）
-- Test: `tests/core/winmerge.test.ts`（追加 `stageRoot` 断言）
+- Test: 退出清理由 Task 9 的 E2E ⑪ 做端到端断言；`stageRoot` 本身已在 Task 3 单测覆盖
 
 **Interfaces:**
 - Consumes: Task 3 的 `stageRoot(pid)`
 
-- [ ] **Step 1: 写失败测试**
-
-追加到 `tests/core/winmerge.test.ts`：
-
-```ts
-describe("stageRoot", () => {
-  it("按 pid 隔离在系统临时目录下", () => {
-    const root = stageRoot(4242)
-    expect(root.endsWith(join("git-ai-commit", "4242"))).toBe(true)
-    expect(root).toContain(tmpdir())
-  })
-})
-```
-
-顶部 import 增加 `tmpdir`（来自 `node:os`）与 `stageRoot`。
-
-- [ ] **Step 2: 跑测试确认失败**
-
-Run: `npx vitest run tests/core/winmerge.test.ts -t "stageRoot"`
-Expected: FAIL —— `stageRoot is not a function`（若 Task 3 已实现则应直接 PASS，此时跳过本步的失败确认并继续 Step 3）
-
-- [ ] **Step 3: 实现退出清理**
+- [ ] **Step 1: 实现退出清理**
 
 `src/main/index.ts` 顶部 import 增加：
 
@@ -1171,15 +1150,15 @@ app.on("will-quit", () => {
 })
 ```
 
-- [ ] **Step 4: 跑测试 + 类型检查**
+- [ ] **Step 2: 类型检查 + 既有测试不回归**
 
-Run: `npx vitest run tests/core/winmerge.test.ts && npm run typecheck`
-Expected: PASS 且 typecheck 干净
+Run: `npm run typecheck && npx vitest run tests/core/winmerge.test.ts`
+Expected: typecheck 干净、单测通过
 
-- [ ] **Step 5: 提交**
+- [ ] **Step 3: 提交**
 
 ```bash
-git add src/main/index.ts tests/core/winmerge.test.ts
+git add src/main/index.ts
 git commit -m "feat(app): clean WinMerge temp files on quit"
 ```
 
@@ -1327,9 +1306,9 @@ Expected: 单测全绿（含新增）且 `src/core` 行覆盖 ≥ 90%；`tsc --n
 | `tools.winmerge_path` | `""` | WinMergeU.exe 的路径；留空则自动查注册表与常见安装位置 |
 ```
 
-- [ ] **Step 3: 对齐 spec**
+- [ ] **Step 3: 对齐 spec（本计划已与 spec 对齐，这一步只是核对）**
 
-把 `docs/superpowers/specs/2026-09-23-winmerge-open-design.md` 里 §7 中「配置指向不存在的文件时继续走探测」改为「配置了 `tools.winmerge_path` 时只认它：存在就用、不存在直接报 `WINMERGE_NOT_FOUND`（不悄悄换别的安装，错误文案带上配置的路径）」，并同步 §5.4 那一行的措辞。
+确认 `docs/superpowers/specs/2026-09-23-winmerge-open-design.md` 里 `detectWinMerge` 与 `WINMERGE_NOT_FOUND` 的描述是「配置了就只认配置值，不存在直接报错」（本轮开工前已改好）。若发现仍有「继续走探测」之类旧措辞，改掉后一并提交。
 
 - [ ] **Step 4: 重新打包并真机复验**
 

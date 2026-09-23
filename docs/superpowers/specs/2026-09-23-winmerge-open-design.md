@@ -146,14 +146,14 @@ winmergeOpen(path: string): Promise<Result<void>>
 ### 单元
 
 - `comparePlan`：四种状态（modified / renamed / added+untracked / deleted）各自的左右落盘计划；空值侧一定是 0 字节占位且**保留扩展名**；`<seq>` 递增不覆盖。
-- `detectWinMerge` 优先级：配置命中（存在才用）→ 注册表 → 常见路径 → 都没有返回 `null`；配置指向不存在的文件时**继续**走探测（不因配置错就整体失败）。
+- `detectWinMerge` 优先级：**配置了 `tools.winmerge_path` 就只认它**（存在才用；不存在直接返回 `null` → 报 `WINMERGE_NOT_FOUND`，错误文案带上配置的路径）。这样「改错了路径」会明说，而不是悄悄换成机器上另一个安装；顺带让「路径填错」的用例在任何机器上都确定复现。未配置时：注册表 InstallLocation → 常见安装路径 → 都没有返回 `null`。
 - `launchWinMerge` 参数顺序：`/s /e /u` 在路径之前，左在右之前（用注入的 spawn 断言 argv，不真启动）。
 
 ### E2E（真 Electron）
 
 1. **能真的拉起来 + 左值确实取自 HEAD**：把 `tools.winmerge_path` 指向 `node.exe`，仓库里放 `probe.js`——HEAD 版内容写 `HEAD`、工作区版写 `WORKTREE`，脚本把读到的自身内容写到一个标记文件。双击该行后断言标记文件里是 **`HEAD`**。这一条同时证明：配置路径被使用、左值来自 `git show HEAD:`、左右参数顺序正确、进程真被拉起。
 2. **双击不切换勾选**：双击已勾选的行，勾选框仍为勾选；双击未勾选的行，仍为未勾选。
-3. **找不到 WinMerge 时弹错误弹层**：`tools.winmerge_path` 指向不存在的路径 + 探测返回空（注入/环境保证），断言出现 `WINMERGE_NOT_FOUND` 文案，且勾选与提交信息不变。
+3. **找不到 WinMerge 时弹错误弹层**：`tools.winmerge_path` 指向不存在的路径（因此必然判定为找不到，与本机是否装了 WinMerge 无关），断言出现 `WINMERGE_NOT_FOUND` 文案，且勾选与提交信息不变。
 4. **退出清临时目录**：双击后 `%TEMP%\git-ai-commit\<app pid>` 存在；`app.close()` 后该目录不存在（用 `app.process().pid` 定位）。
 
 ## 8. 风险
