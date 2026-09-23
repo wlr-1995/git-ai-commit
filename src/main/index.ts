@@ -1,8 +1,10 @@
 import { app, BrowserWindow, dialog } from "electron"
+import { rmSync } from "node:fs"
 import { basename, join, normalize } from "node:path"
 
 import { loadConfig } from "../core/config"
 import { findRepoRoot } from "../core/repo"
+import { stageRoot } from "../core/winmerge"
 import { registerIpc } from "./ipc"
 
 const MIN_WIDTH = 560
@@ -80,3 +82,12 @@ function fatal(message: string): void {
 }
 
 app.on("window-all-closed", () => app.quit())
+
+// 尽力清理本次运行的临时对比文件；WinMerge 还占着文件时删除会失败，忽略即可
+app.on("will-quit", () => {
+  try {
+    rmSync(stageRoot(process.pid), { recursive: true, force: true })
+  } catch {
+    /* 占着就下次再说，%TEMP% 由系统收拾 */
+  }
+})
