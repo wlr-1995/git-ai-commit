@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process"
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs"
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs"
 import { createServer } from "node:http"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -32,6 +32,110 @@ function makeConfig(overrides: Record<string, unknown> = {}): string {
   writeFileSync(file, JSON.stringify(overrides), "utf8")
   return file
 }
+
+/**
+ * 假 WinMerge 的引导脚本（本机没装 WinMerge，用 node.exe 冒充）。
+ *
+ * 主进程以 `/s /e /u <left> <right>` 拉起假 WinMerge，但 node 会把首个参数 `/s`
+ * 当脚本路径、直接报「Cannot find module」而不执行 left。于是启动应用前设
+ * `node_options=--require=<本脚本>`（launchApp 会把 process.env 传给 Electron，
+ * 子进程继承该变量），让 node 先加载这里；它再把 left（argv[4]，即 `git show HEAD:`
+ * 落下的 probe.js）当模块 require —— probe.js 因此真正执行，把自身的
+ * HEAD/WORKTREE 标签写进标记文件。
+ *
+ * 用小写 `node_options` 而非 `NODE_OPTIONS`：Playwright 的 electron.launch 会
+ * `delete env.NODE_OPTIONS`（见 playwright-core electron launcher），Windows 环境变量
+ * 大小写不敏感，换个大小写恰好绕过这一步而仍被 node 识别。
+ */
+const fakeWinMergeBootstrap = join(mkdtempSync(join(tmpdir(), "gac-boot-")), "boot.js")
+writeFileSync(
+  fakeWinMergeBootstrap,
+  `try { const entry = process.argv[4]; if (entry && entry.endsWith("probe.js")) require(entry) } catch {}\n`,
+  "utf8",
+)
+process.env.node_options = `--require=${fakeWinMergeBootstrap}`
+
+/** 造一个含 probe.js 的仓库：HEAD 版写 "HEAD"，工作区版写 "WORKTREE"。 */
+function makeProbeRepo(marker: string): string {
+  const dir = makeRepo()
+  const body = (tag: string): string =>
+    `require("node:fs").writeFileSync(${JSON.stringify(marker)}, ${JSON.stringify(tag)})\n`
+  writeFileSync(join(dir, "probe.js"), body("HEAD"), "utf8")
+  git(dir, ["add", "-A"])
+  git(dir, ["commit", "-m", "probe"])
+  writeFileSync(join(dir, "probe.js"), body("WORKTREE"), "utf8")
+  return dir
+}
+
+test("⑧ 双击行用 WinMerge 打开：左值取自 HEAD（假 WinMerge = node.exe）", async () => {
+  const markerDir = mkdtempSync(join(tmpdir(), "gac-mark-"))
+  const marker = join(markerDir, "marker.txt")
+  const repo = makeProbeRepo(marker)
+  const configFile = makeConfig({ tools: { winmerge_path: process.execPath } })
+
+  const app = await launchApp({ repo, configFile })
+  const window = await app.firstWindow()
+  await window.waitForSelector('#changes-body tr[data-path="probe.js"]')
+
+  await window.dblclick('#changes-body tr[data-path="probe.js"]')
+
+  await expect.poll(() => (existsSync(marker) ? readFileSync(marker, "utf8") : ""), {
+    timeout: 15_000,
+  }).toBe("HEAD")
+
+  await app.close()
+})
+
+test("⑨ 双击不改变勾选状态", async () => {
+  const repo = makeRepo() // tracked.txt 默认勾选、new.txt 未跟踪默认不显示
+  const app = await launchApp({ repo, configFile: makeConfig({ tools: { winmerge_path: process.execPath } }) })
+  const window = await app.firstWindow()
+  const box = window.locator('#changes-body tr[data-path="tracked.txt"] input[type=checkbox]')
+
+  await expect(box).toBeChecked()
+  await window.dblclick('#changes-body tr[data-path="tracked.txt"]')
+  await expect(box).toBeChecked()
+
+  await app.close()
+})
+
+test("⑩ 找不到 WinMerge 时弹错误弹层，且不动其它状态", async () => {
+  const repo = makeRepo()
+  const configFile = makeConfig({ tools: { winmerge_path: "C:\\definitely-missing\\WinMergeU.exe" } })
+  const app = await launchApp({ repo, configFile })
+  const window = await app.firstWindow()
+  await window.waitForSelector("#changes-body tr")
+
+  await window.fill("#message", "别动我")
+  await window.dblclick('#changes-body tr[data-path="tracked.txt"]')
+
+  await expect(window.locator(".modal-backdrop")).toBeVisible()
+  await expect(window.locator("#message-detail")).toContainText("未找到 WinMerge")
+  await expect(window.locator("#message")).toHaveValue("别动我")
+
+  await app.close()
+})
+
+test("⑪ 退出后临时目录被清理", async () => {
+  const markerDir = mkdtempSync(join(tmpdir(), "gac-mark2-"))
+  const repo = makeProbeRepo(join(markerDir, "m.txt"))
+  const app = await launchApp({
+    repo,
+    configFile: makeConfig({ tools: { winmerge_path: process.execPath } }),
+  })
+  const window = await app.firstWindow()
+  await window.waitForSelector('#changes-body tr[data-path="probe.js"]')
+  await window.dblclick('#changes-body tr[data-path="probe.js"]')
+
+  // app.process().pid 是 Playwright 在 Windows 上经 shell 拉起的中间进程（cmd.exe），
+  // 不是 stageRoot 所用的 Electron 主进程 pid；要进主进程问它自己的 pid。
+  const pid = await app.evaluate(() => process.pid)
+  const dir = join(tmpdir(), "git-ai-commit", String(pid))
+  await expect.poll(() => existsSync(dir), { timeout: 15_000 }).toBe(true)
+
+  await app.close()
+  await expect.poll(() => existsSync(dir), { timeout: 15_000 }).toBe(false)
+})
 
 interface LaunchOptions {
   repo: string
