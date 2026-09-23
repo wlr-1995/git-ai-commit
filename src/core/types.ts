@@ -37,6 +37,7 @@ export interface AppConfig {
     timeout: number
   }
   git: { max_diff_lines: number }
+  tools: { winmerge_path: string }
   ui: { window_width: number; window_height: number; show_untracked: boolean; style: string }
   selection: { checked_by_default: string }
   [key: string]: unknown

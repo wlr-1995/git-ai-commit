@@ -80,6 +80,24 @@ describe("loadConfig", () => {
   })
 })
 
+describe("tools.winmerge_path", () => {
+  it("默认配置含 tools.winmerge_path 且为空（表示自动探测）", () => {
+    expect(DEFAULT_CONFIG.tools.winmerge_path).toBe("")
+  })
+
+  it("旧配置文件没有 tools 键时回落为空字符串", () => {
+    const cfgFile = join(makeTempDir(), "config.json")
+    writeFileSync(cfgFile, JSON.stringify({ api: { url: "http://x/v1" } }), "utf8")
+    expect(loadConfig(cfgFile).tools.winmerge_path).toBe("")
+  })
+
+  it("tools.winmerge_path 能被读回", () => {
+    const cfgFile = join(makeTempDir(), "config.json")
+    writeFileSync(cfgFile, JSON.stringify({ tools: { winmerge_path: "D:\\W\\WinMergeU.exe" } }), "utf8")
+    expect(loadConfig(cfgFile).tools.winmerge_path).toBe("D:\\W\\WinMergeU.exe")
+  })
+})
+
 describe("saveConfig", () => {
   it("中文往返", () => {
     const cfgFile = join(makeTempDir(), "config.json")

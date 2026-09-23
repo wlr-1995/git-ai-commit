@@ -18,6 +18,7 @@ export const DEFAULT_CONFIG: AppConfig = {
     timeout: 60,
   },
   git: { max_diff_lines: 200 },
+  tools: { winmerge_path: "" },
   ui: { window_width: 1100, window_height: 640, show_untracked: false, style: DEFAULT_STYLE },
   selection: { checked_by_default: "tracked" },
 }
