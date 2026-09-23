@@ -90,7 +90,7 @@ winmergeOpen(path: string): Promise<Result<void>>
 ```
 
 - 渲染层只传**仓库内相对路径**（与 `diff:read` 同一套规矩，`resolveInsideRepo` 校验；绝对路径、`..` 越界、NUL 一律拒绝）。
-- 主进程**不信任渲染层给的其它字段**：自己 `listChanges(repoRoot)` 重新查出这条记录拿 `status` / `origPath`；查不到（列表已过期）返回 `PATH_INVALID`（文案：请先按 F5 刷新）。
+- 主进程**不信任渲染层给的其它字段**：自己 `listChanges(repoRoot)` 重新查出这条记录拿 `status` / `origPath`；查不到（列表已过期）返回 `PATH_OUTSIDE_REPO`（复用现有错误码；文案：`变更列表已过期，请按 F5 刷新后重试。`）。
 - 新错误码：`WINMERGE_NOT_FOUND`、`WINMERGE_LAUNCH_FAILED`。
 
 ## 5. 行为细节
@@ -128,8 +128,8 @@ winmergeOpen(path: string): Promise<Result<void>>
 |---|---|---|
 | 找不到 WinMerge（含配置指向了不存在的文件） | `WINMERGE_NOT_FOUND` | `未找到 WinMerge。装一个，或在设置里填写 WinMergeU.exe 的路径。`（配置过就补一句：`当前配置的路径是 <path>`） |
 | spawn 抛错（权限、损坏的 exe） | `WINMERGE_LAUNCH_FAILED` | `WinMerge 启动失败：<原因>` |
-| 路径不在仓库内 | `PATH_INVALID` | 沿用现有文案 |
-| 列表里已没有该路径 | `PATH_INVALID` | `变更列表已过期，请按 F5 刷新后重试。` |
+| 路径不在仓库内 | `PATH_OUTSIDE_REPO` | 沿用现有文案 |
+| 列表里已没有该路径 | `PATH_OUTSIDE_REPO`（复用） | `变更列表已过期，请按 F5 刷新后重试。` |
 
 - 失败一律**不改动**勾选状态与提交信息。
 
