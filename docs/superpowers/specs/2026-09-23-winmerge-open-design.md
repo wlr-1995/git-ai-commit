@@ -56,6 +56,7 @@ export function detectWinMerge(configured: string, probe?: Probe): string | null
 /** 一次对比该落哪些文件（纯函数，不碰磁盘，便于单测）。 */
 export function comparePlan(
   change: { path: string; status: string; origPath: string | null },
+  worktreePath: string,
   stageDir: string,
 ): { leftPath: string; leftFromHead: string | null; rightPath: string; rightEmpty: boolean }
 
@@ -63,7 +64,7 @@ export function comparePlan(
 export function launchWinMerge(exe: string, left: string, right: string): void
 ```
 
-- `Probe` 注入点（`exists`、`readRegistryInstallLocation`、`listCommonPaths`），让探测逻辑可单测，不在测试里依赖真实安装。
+- `Probe` 注入点（`exists`、`registryInstallLocations`、`commonPaths`），让探测逻辑可单测，不在测试里依赖真实安装。
 - 左值源：`leftFromHead = "HEAD:<path>"`（重命名时用 `origPath`）；`null` 表示左侧也写成空文件。
 - 右侧：`rightPath = <repoRoot>\<path>`（真实路径）；`rightEmpty = true` 时（仅已删除）改成占位空文件。
 
@@ -126,7 +127,7 @@ winmergeOpen(path: string): Promise<Result<void>>
 
 | 情况 | 错误码 | 弹层文案 |
 |---|---|---|
-| 找不到 WinMerge（含配置指向了不存在的文件） | `WINMERGE_NOT_FOUND` | `未找到 WinMerge。装一个，或在设置里填写 WinMergeU.exe 的路径。`（配置过就补一句：`当前配置的路径是 <path>`） |
+| 找不到 WinMerge（含配置指向了不存在的文件） | `WINMERGE_NOT_FOUND` | `未找到 WinMerge。装一个，或在设置里填写 WinMergeU.exe 的路径。`（配置过就补一句：`当前配置的路径：<path>`） |
 | spawn 抛错（权限、损坏的 exe） | `WINMERGE_LAUNCH_FAILED` | `WinMerge 启动失败：<原因>` |
 | 路径不在仓库内 | `PATH_OUTSIDE_REPO` | 沿用现有文案 |
 | 列表里已没有该路径 | `PATH_OUTSIDE_REPO`（复用） | `变更列表已过期，请按 F5 刷新后重试。` |
@@ -137,7 +138,7 @@ winmergeOpen(path: string): Promise<Result<void>>
 
 新增 `tools.winmerge_path`（默认 `""` = 自动探测）。
 
-- 设置弹层加一组「工具」，一个文本输入框：`WinMerge 路径（留空自动查找）`，placeholder 提示 `如 C:\Program Files\WinMerge\WinMergeU.exe`。
+- 设置弹层加一组「工具」，一个文本输入框：`WinMerge 路径`，placeholder 提示 `留空自动查找，如 C:\Program Files\WinMerge\WinMergeU.exe`。
 - 不参与现有「接口地址不能为空」那类校验（留空合法）。
 - `config.ts` 的 `deepMerge` 自动补默认值，旧配置文件缺该键时回落到 `""`。
 
@@ -145,7 +146,7 @@ winmergeOpen(path: string): Promise<Result<void>>
 
 ### 单元
 
-- `comparePlan`：四种状态（modified / renamed / added+untracked / deleted）各自的左右落盘计划；空值侧一定是 0 字节占位且**保留扩展名**；`<seq>` 递增不覆盖。
+- `comparePlan`：四种状态（modified / renamed / added+untracked / deleted）各自的左右落盘计划；空值侧一定是 0 字节占位且**保留扩展名**；同一进程内 `<seq>` 单调递增由 `ipc.ts` 保证（其单测用两个不同 stageDir 验证同名不互相覆盖），端到端由 E2E 覆盖。
 - `detectWinMerge` 优先级：**配置了 `tools.winmerge_path` 就只认它**（存在才用；不存在直接返回 `null` → 报 `WINMERGE_NOT_FOUND`，错误文案带上配置的路径）。这样「改错了路径」会明说，而不是悄悄换成机器上另一个安装；顺带让「路径填错」的用例在任何机器上都确定复现。未配置时：注册表 InstallLocation → 常见安装路径 → 都没有返回 `null`。
 - `launchWinMerge` 参数顺序：`/s /e /u` 在路径之前，左在右之前（用注入的 spawn 断言 argv，不真启动）。
 

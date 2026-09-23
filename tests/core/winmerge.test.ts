@@ -285,5 +285,6 @@ describe("WINMERGE_ARGS / launchWinMerge", () => {
     const error = await launchWinMerge("C:\\W\\W.exe", "L", "R", fakeSpawn).catch((e) => e)
     expect(error).toBeInstanceOf(WinMergeError)
     expect((error as WinMergeError).reason).toBe("launch_failed")
+    expect((error as Error).message).toContain("拒绝访问")
   })
 })

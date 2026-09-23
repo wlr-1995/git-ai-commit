@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process"
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs"
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { createServer } from "node:http"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -37,9 +37,9 @@ function makeConfig(overrides: Record<string, unknown> = {}): string {
  * 假 WinMerge 的引导脚本（本机没装 WinMerge，用 node.exe 冒充）。
  *
  * 主进程以 `/s /e /u <left> <right>` 拉起假 WinMerge，但 node 会把首个参数 `/s`
- * 当脚本路径、直接报「Cannot find module」而不执行 left。于是启动应用前设
- * `node_options=--require=<本脚本>`（launchApp 会把 process.env 传给 Electron，
- * 子进程继承该变量），让 node 先加载这里；它再把 left（argv[4]，即 `git show HEAD:`
+ * 当脚本路径、直接报「Cannot find module」而不执行 left。于是这两条用例经
+ * launchApp 的 extraEnv 传 `node_options=--require=<本脚本>`（子进程继承该变量），
+ * 让 node 先加载这里；它再把 left（argv[4]，即 `git show HEAD:`
  * 落下的 probe.js）当模块 require —— probe.js 因此真正执行，把自身的
  * HEAD/WORKTREE 标签写进标记文件。
  *
@@ -47,13 +47,31 @@ function makeConfig(overrides: Record<string, unknown> = {}): string {
  * `delete env.NODE_OPTIONS`（见 playwright-core electron launcher），Windows 环境变量
  * 大小写不敏感，换个大小写恰好绕过这一步而仍被 node 识别。
  */
-const fakeWinMergeBootstrap = join(mkdtempSync(join(tmpdir(), "gac-boot-")), "boot.js")
-writeFileSync(
-  fakeWinMergeBootstrap,
-  `try { const entry = process.argv[4]; if (entry && entry.endsWith("probe.js")) require(entry) } catch {}\n`,
-  "utf8",
-)
-process.env.node_options = `--require=${fakeWinMergeBootstrap}`
+/**
+ * 引导脚本的临时目录只在 worker 的 `beforeAll` 里建：Playwright 的收集阶段也会
+ * 在主进程求值本文件，若在顶层 `mkdtempSync`，主进程那份没有 `afterAll` 可清、
+ * 会永久残留在 `%TEMP%`。
+ */
+let bootDir = ""
+let fakeWinMergeEnv: Record<string, string> = {}
+
+test.beforeAll(() => {
+  bootDir = mkdtempSync(join(tmpdir(), "gac-boot-"))
+  const bootstrap = join(bootDir, "boot.js")
+  writeFileSync(
+    bootstrap,
+    `try { const entry = process.argv[4]; if (entry && entry.endsWith("probe.js")) require(entry) } catch {}\n`,
+    "utf8",
+  )
+  // 只给需要假 WinMerge 的 ⑧⑪ 传 node_options，避免泄漏给同 worker 的其它用例。
+  // 路径加引号防 %TEMP% 含空格被按空白切分；用正斜杠是因为 NODE_OPTIONS 解析时
+  // 双引号内的反斜杠会被当转义吃掉（C:\Users\... 会变成 C:Users...）。
+  fakeWinMergeEnv = { node_options: `--require="${bootstrap.replace(/\\/g, "/")}"` }
+})
+
+test.afterAll(() => {
+  if (bootDir) rmSync(bootDir, { recursive: true, force: true })
+})
 
 /** 造一个含 probe.js 的仓库：HEAD 版写 "HEAD"，工作区版写 "WORKTREE"。 */
 function makeProbeRepo(marker: string): string {
@@ -73,7 +91,7 @@ test("⑧ 双击行用 WinMerge 打开：左值取自 HEAD（假 WinMerge = node
   const repo = makeProbeRepo(marker)
   const configFile = makeConfig({ tools: { winmerge_path: process.execPath } })
 
-  const app = await launchApp({ repo, configFile })
+  const app = await launchApp({ repo, configFile, extraEnv: fakeWinMergeEnv })
   const window = await app.firstWindow()
   await window.waitForSelector('#changes-body tr[data-path="probe.js"]')
 
@@ -112,6 +130,7 @@ test("⑩ 找不到 WinMerge 时弹错误弹层，且不动其它状态", async 
   await expect(window.locator(".modal-backdrop")).toBeVisible()
   await expect(window.locator("#message-detail")).toContainText("未找到 WinMerge")
   await expect(window.locator("#message")).toHaveValue("别动我")
+  await expect(window.locator('#changes-body tr[data-path="tracked.txt"] input[type=checkbox]')).toBeChecked()
 
   await app.close()
 })
@@ -122,6 +141,7 @@ test("⑪ 退出后临时目录被清理", async () => {
   const app = await launchApp({
     repo,
     configFile: makeConfig({ tools: { winmerge_path: process.execPath } }),
+    extraEnv: fakeWinMergeEnv,
   })
   const window = await app.firstWindow()
   await window.waitForSelector('#changes-body tr[data-path="probe.js"]')
@@ -141,12 +161,14 @@ interface LaunchOptions {
   repo: string
   configFile?: string
   noDialog?: boolean
+  extraEnv?: Record<string, string>
 }
 
-async function launchApp({ repo, configFile, noDialog }: LaunchOptions): Promise<ElectronApplication> {
+async function launchApp({ repo, configFile, noDialog, extraEnv }: LaunchOptions): Promise<ElectronApplication> {
   const env: Record<string, string> = { ...(process.env as Record<string, string>) }
   if (configFile) env.GIT_AI_COMMIT_CONFIG = configFile
   if (noDialog) env.GIT_AI_COMMIT_NO_DIALOG = "1"
+  if (extraEnv) Object.assign(env, extraEnv)
   return electron.launch({ args: [".", repo], env })
 }
 
