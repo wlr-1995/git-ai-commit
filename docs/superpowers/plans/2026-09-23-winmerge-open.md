@@ -908,13 +908,13 @@ let winmergeSeq = 0
 
 - [ ] **Step 4: 跑测试确认通过**
 
-Run: `npx vitest run tests/core/ipc-errors.test.ts`
+Run: `npx vitest run tests/core/errors.test.ts`
 Expected: PASS
 
 - [ ] **Step 5: 提交**
 
 ```bash
-git add src/core/types.ts src/shared/ipc.ts src/main/ipc.ts tests/core/ipc-errors.test.ts
+git add src/core/types.ts src/shared/ipc.ts src/main/ipc.ts tests/core/errors.test.ts
 git commit -m "feat(ipc): winmerge:open channel"
 ```
 
