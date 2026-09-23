@@ -16,7 +16,7 @@
 |---|---|---|
 | 比什么 | HEAD ↔ 工作区 | 与「勾选即提交」的模型一致：提交的就是工作区相对 HEAD 的差异 |
 | 触发 | **仅双击行** | 单击保持原语义（选中该行 + 右栏内置 diff）；不加按钮/右键菜单/Enter，避免与刚做的界面弱化方向相悖 |
-| WinMerge 位置 | 配置 `tools.winmerge_path` → 注册表 → 常见路径；找不到报错 | 免安装场景不能假设路径固定 |
+| WinMerge 位置 | 配置了 `tools.winmerge_path` 就只认它（不存在即报错）；留空才查注册表 → 常见路径；都找不到报错 | 免安装场景不能假设路径固定 |
 | 右侧 | **永远给工作区真实路径**（不落快照） | 在 WinMerge 里直接看/直接改真实文件才是本意 |
 | 启动参数 | `WinMergeU /s /e /u <左> <右>` | 见 §5.2 |
 | 已删除的文件 | 左侧 = HEAD 版临时文件，右侧 = 同扩展名**空文件占位** | 官方文档：路径不存在时 WinMerge 会打开「选择文件或文件夹」对话框 → 会多出一个窗口 |
@@ -50,7 +50,7 @@ WinMerge 2.16 官方手册 *Command line* 原文：
 ### 4.1 新增 `src/core/winmerge.ts`
 
 ```ts
-/** 找 WinMergeU.exe：配置优先，其次注册表，其次常见安装路径。返回绝对路径或 null。 */
+/** 找 WinMergeU.exe：配置了就只认它（不存在返回 null 报错），留空才查注册表与常见安装路径。返回绝对路径或 null。 */
 export function detectWinMerge(configured: string, probe?: Probe): string | null
 
 /** 一次对比该落哪些文件（纯函数，不碰磁盘，便于单测）。 */

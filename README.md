@@ -77,6 +77,7 @@ pwsh -NoProfile -File install\uninstall.ps1    # 移除右键菜单
 ```
 
 - **勾选**：点勾选框切换；点行的其它位置 = 选中该行并在右侧显示它的 diff（不影响勾选）
+- **双击文件**：用 WinMerge 对比该文件的 HEAD 版与工作区版（左 = HEAD，右 = 工作区真实文件）；同一时刻只占一个 WinMerge 窗口，`Esc` 一次关闭。已删除的文件右侧显示为空。找不到 WinMerge 时弹提示，可在设置里填路径
 - **过滤**：`全部(A)` / `无(N)` 是全选 / 全不选；`已添加` / `已删除` / `已修改` 只**累加勾选**，不会取消别的勾选
 - **默认不显示未受版本控制的文件**（它们也不会被提交）；勾上开关才列出
 - **快捷键**：`F5` 刷新；`Ctrl+,` 打开设置；表格聚焦时 `A` 全选 / `N` 全不选 / `U` 切换未跟踪开关；`Esc` 关闭弹层
@@ -100,6 +101,7 @@ pwsh -NoProfile -File install\uninstall.ps1    # 移除右键菜单
 | `api.language` | `中文` | 默认提示词里要求的输出语言 |
 | `api.timeout` | `60` | 请求超时（秒），设置界面限制 1–600 |
 | `git.max_diff_lines` | `200` | 送给 AI 与 diff 面板共用的最大行数 |
+| `tools.winmerge_path` | `""` | WinMergeU.exe 的路径；留空则自动查注册表与常见安装位置 |
 | `ui.window_width` / `ui.window_height` | `1100` / `640` | 开窗尺寸（最小 560×420） |
 | `ui.show_untracked` | `false` | 启动时是否显示未受版本控制的文件 |
 | `ui.style` | `light` | 主题 key（见下） |
