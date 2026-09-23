@@ -29,6 +29,8 @@ export interface RunGitOptions {
 export interface GitResult {
   code: number
   stdout: string
+  /** 原始字节：二进制内容（图片、压缩包）必须用它写盘，不能用 utf8 解码后的 stdout */
+  stdoutBuffer: Buffer
   stderr: string
 }
 
@@ -99,14 +101,15 @@ export async function runGit(args: string[], options: RunGitOptions = {}): Promi
         reject(new GitError(`git 命令超时: ${args.join(" ")}`, "timeout"))
         return
       }
-      const stdout = Buffer.concat(out).toString("utf8")
+      const stdoutBuffer = Buffer.concat(out)
+      const stdout = stdoutBuffer.toString("utf8")
       const stderr = Buffer.concat(err).toString("utf8")
       const exitCode = code ?? 1
       if (check && exitCode !== 0) {
         reject(new GitError(stderr.trim() || `git 退出码 ${exitCode}: ${args.join(" ")}`, "exit"))
         return
       }
-      resolve({ code: exitCode, stdout, stderr })
+      resolve({ code: exitCode, stdout, stdoutBuffer, stderr })
     })
   })
 }

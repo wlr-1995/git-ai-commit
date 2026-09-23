@@ -58,3 +58,17 @@ maybe("gitcmd", () => {
     expect(stdout).toBe("")
   })
 })
+
+maybe("gitcmd 原始字节", () => {
+  it("stdoutBuffer 保留原始字节（二进制不被 utf8 解码改坏）", async () => {
+    const repo = makeTempDir()
+    spawnSync("git", ["init"], { cwd: repo })
+    const raw = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0xff, 0xfe, 0x01])
+    writeFileSync(join(repo, "blob.bin"), raw)
+    spawnSync("git", ["add", "-A"], { cwd: repo })
+    spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-m", "bin"], { cwd: repo })
+
+    const result = await runGit(["show", "HEAD:blob.bin"], { cwd: repo })
+    expect(result.stdoutBuffer.equals(raw)).toBe(true)
+  })
+})
