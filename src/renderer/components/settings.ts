@@ -6,13 +6,15 @@ export interface SettingsValues {
   apiKey: string
   timeout: number
   style: string
+  winmergePath: string
 }
 
-/** 只组装要落盘的键：api 四键 + ui.style（其余配置由主进程 deepMerge 保留）。 */
+/** 只组装要落盘的键：api 四键 + ui.style + tools（其余配置由主进程 deepMerge 保留）。 */
 export function buildSettingsValues(input: SettingsValues): Record<string, unknown> {
   return {
     api: { url: input.url, model: input.model, api_key: input.apiKey, timeout: input.timeout },
     ui: { style: input.style },
+    tools: { winmerge_path: input.winmergePath.trim() },
   }
 }
 
@@ -31,6 +33,7 @@ export interface SettingsDialogOptions {
   config: {
     api: { url: string; model: string; api_key: string; timeout: number }
     ui: { style: string }
+    tools: { winmerge_path: string }
   }
   themes: ThemeInfo[]
   onPreview: (key: string) => void
@@ -76,6 +79,14 @@ export function openSettingsDialog(options: SettingsDialogOptions): SettingsDial
         </div>
       </div>
       <div class="group">
+        <div class="group-title">工具</div>
+        <div class="field">
+          <label for="winmerge-path">WinMerge 路径</label>
+          <input id="winmerge-path" type="text" placeholder="留空自动查找，如 C:\\Program Files\\WinMerge\\WinMergeU.exe"
+                 value="${escapeHtml(options.config.tools.winmerge_path)}" />
+        </div>
+      </div>
+      <div class="group">
         <div class="group-title">模型</div>
         <div class="field">
           <label for="api-url">接口地址</label>
@@ -108,6 +119,7 @@ export function openSettingsDialog(options: SettingsDialogOptions): SettingsDial
   const modelInput = backdrop.querySelector<HTMLInputElement>("#api-model")!
   const keyInput = backdrop.querySelector<HTMLInputElement>("#api-key")!
   const timeoutInput = backdrop.querySelector<HTMLInputElement>("#timeout")!
+  const winmergeInput = backdrop.querySelector<HTMLInputElement>("#winmerge-path")!
   const saveButton = backdrop.querySelector<HTMLButtonElement>("#settings-save")!
   const validation = backdrop.querySelector<HTMLElement>("#settings-validation")!
 
@@ -127,6 +139,7 @@ export function openSettingsDialog(options: SettingsDialogOptions): SettingsDial
       apiKey: keyInput.value,
       timeout: parseTimeout(timeoutInput.value),
       style: styleSelect.value,
+      winmergePath: winmergeInput.value,
     })
 
   const validate = (): boolean => {

@@ -203,6 +203,7 @@ async function openSettings(): Promise<void> {
         timeout: config.value.api.timeout,
       },
       ui: { style: config.value.ui.style },
+      tools: { winmerge_path: config.value.tools.winmerge_path },
     },
     themes,
     onPreview: (key) => applyTheme(key),
