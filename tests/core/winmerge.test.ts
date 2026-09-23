@@ -1,9 +1,20 @@
+import { spawn } from "node:child_process"
 import { existsSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
 import { describe, expect, it } from "vitest"
 
-import { comparePlan, prepareComparison } from "../../src/core/winmerge"
+import {
+  WINMERGE_ARGS,
+  WinMergeError,
+  comparePlan,
+  detectWinMerge,
+  launchWinMerge,
+  notFoundMessage,
+  parseRegQueryInstallLocation,
+  prepareComparison,
+  type WinMergeProbe,
+} from "../../src/core/winmerge"
 import { ADDED, DELETED, MODIFIED, RENAMED, UNTRACKED } from "../../src/shared/changes"
 import { commitAll, git, initRepo, makeTempDir, writeFile } from "../helpers/repo"
 
@@ -137,5 +148,97 @@ describe("prepareComparison", () => {
     )
     expect(first.left).not.toBe(second.left)
     expect(readFileSync(first.left, "utf8")).toBe("v1\n")
+  })
+})
+
+describe("detectWinMerge", () => {
+  const probe = (existing: string[], registry: string[], common: string[]): WinMergeProbe => ({
+    exists: (path) => existing.includes(path),
+    registryInstallLocations: () => registry,
+    commonPaths: () => common,
+  })
+
+  it("配置了 exe 路径且存在 → 直接用配置值", () => {
+    const configured = "D:\\Tools\\WinMerge\\WinMergeU.exe"
+    expect(detectWinMerge(configured, probe([configured], [], []))).toBe(configured)
+  })
+
+  it("配置了目录 → 补上 WinMergeU.exe", () => {
+    const dir = "D:\\Tools\\WinMerge"
+    const exe = join(dir, "WinMergeU.exe")
+    expect(detectWinMerge(dir, probe([exe], [], []))).toBe(exe)
+  })
+
+  it("配置了但不存在 → 直接失败，不再往下探测（避免悄悄换成别的安装）", () => {
+    const common = ["C:\\Program Files\\WinMerge\\WinMergeU.exe"]
+    expect(detectWinMerge("C:\\nope\\WinMergeU.exe", probe(common, [], common))).toBeNull()
+  })
+
+  it("未配置 → 注册表 InstallLocation 优先于常见路径", () => {
+    const fromRegistry = "D:\\Green\\WinMerge\\WinMergeU.exe"
+    const common = "C:\\Program Files\\WinMerge\\WinMergeU.exe"
+    expect(detectWinMerge("", probe([fromRegistry, common], ["D:\\Green\\WinMerge"], [common]))).toBe(fromRegistry)
+  })
+
+  it("未配置且注册表没有 → 用常见路径", () => {
+    const common = "C:\\Program Files\\WinMerge\\WinMergeU.exe"
+    expect(detectWinMerge("", probe([common], [], [common]))).toBe(common)
+  })
+
+  it("都没有 → null", () => {
+    expect(detectWinMerge("", probe([], [], []))).toBeNull()
+  })
+
+  it("parseRegQueryInstallLocation 能从 reg query 输出里取值，无匹配返回 null", () => {
+    const output = [
+      "",
+      "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\WinMerge",
+      "    InstallLocation    REG_SZ    C:\\Program Files\\WinMerge\\",
+      "",
+    ].join("\r\n")
+    expect(parseRegQueryInstallLocation(output)).toBe("C:\\Program Files\\WinMerge\\")
+    expect(parseRegQueryInstallLocation("错误: 系统找不到指定的注册表项或值。")).toBeNull()
+  })
+
+  it("notFoundMessage 带上配置过的路径", () => {
+    expect(notFoundMessage("")).toContain("未找到 WinMerge")
+    expect(notFoundMessage("C:\\nope\\WinMergeU.exe")).toContain("C:\\nope\\WinMergeU.exe")
+  })
+})
+
+describe("WINMERGE_ARGS / launchWinMerge", () => {
+  it("参数顺序：/s /e /u 在路径之前，左在右之前", () => {
+    expect(WINMERGE_ARGS("L.txt", "R.txt")).toEqual(["/s", "/e", "/u", "L.txt", "R.txt"])
+  })
+
+  it("detached 启动、不等待，且把参数原样传给 exe", async () => {
+    const calls: { exe: string; args: string[]; options: unknown }[] = []
+    const fakeSpawn = ((exe: string, args: string[], options: unknown) => {
+      calls.push({ exe, args, options })
+      return {
+        once(event: string, handler: () => void) {
+          if (event === "spawn") handler()
+          return this
+        },
+        unref() {},
+      }
+    }) as unknown as typeof spawn
+
+    await launchWinMerge("C:\\W\\WinMergeU.exe", "L", "R", fakeSpawn)
+    expect(calls[0].exe).toBe("C:\\W\\WinMergeU.exe")
+    expect(calls[0].args).toEqual(["/s", "/e", "/u", "L", "R"])
+    expect((calls[0].options as { detached: boolean }).detached).toBe(true)
+  })
+
+  it("spawn 报错 → WinMergeError(launch_failed)", async () => {
+    const fakeSpawn = (() => ({
+      once(event: string, handler: (error: Error) => void) {
+        if (event === "error") handler(new Error("拒绝访问"))
+        return this
+      },
+      unref() {},
+    })) as unknown as typeof spawn
+
+    await expect(launchWinMerge("C:\\W\\W.exe", "L", "R", fakeSpawn)).rejects.toThrow(/拒绝访问/)
   })
 })
