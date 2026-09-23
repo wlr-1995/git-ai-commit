@@ -116,16 +116,16 @@ const defaultRegRunner: RegRunner = (key) => {
 
 export interface WinMergeProbe {
   exists(path: string): boolean
-  registryInstallLocations(): string[]
+  registryInstallLocations(run?: RegRunner): string[]
   commonPaths(): string[]
 }
 
 export const defaultProbe: WinMergeProbe = {
   exists: (path) => existsSync(path),
-  registryInstallLocations: () => {
+  registryInstallLocations: (run: RegRunner = defaultRegRunner) => {
     const found: string[] = []
     for (const key of REG_KEYS) {
-      const location = defaultRegRunner(key)
+      const location = run(key)
       if (location) found.push(location)
     }
     return found

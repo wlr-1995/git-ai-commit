@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process"
 import { existsSync, readFileSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { describe, expect, it } from "vitest"
@@ -8,11 +9,13 @@ import {
   WINMERGE_ARGS,
   WinMergeError,
   comparePlan,
+  defaultProbe,
   detectWinMerge,
   launchWinMerge,
   notFoundMessage,
   parseRegQueryInstallLocation,
   prepareComparison,
+  stageRoot,
   type WinMergeProbe,
 } from "../../src/core/winmerge"
 import { ADDED, DELETED, MODIFIED, RENAMED, UNTRACKED } from "../../src/shared/changes"
@@ -206,6 +209,40 @@ describe("detectWinMerge", () => {
   })
 })
 
+describe("defaultProbe / stageRoot", () => {
+  it("registryInstallLocations 用注入的 runner，不碰真实注册表", () => {
+    // 只让其中一个 key 命中，才能断言结果恰好一条；REG_KEYS 按顺序访问，命中用哪个 key 不影响结论。
+    const runner = (key: string) => (key === "HKLM\\SOFTWARE\\WinMerge" ? "D:\\Green\\WinMerge\\" : null)
+    expect(defaultProbe.registryInstallLocations(runner)).toEqual(["D:\\Green\\WinMerge\\"])
+  })
+
+  it("exists 对真实文件为 true、对不存在的路径为 false", () => {
+    const dir = makeTempDir("gac-exists-")
+    const file = join(dir, "present.txt")
+    writeFileSync(file, "x")
+    expect(defaultProbe.exists(file)).toBe(true)
+    expect(defaultProbe.exists(join(dir, "missing.txt"))).toBe(false)
+  })
+
+  it("stageRoot 按 pid 隔离在系统临时目录下", () => {
+    const root = stageRoot(4242)
+    expect(root.endsWith(join("git-ai-commit", "4242"))).toBe(true)
+    expect(root).toContain(tmpdir())
+  })
+
+  it("commonPaths 从 ProgramFiles 拼出常见安装路径", () => {
+    const old = process.env.ProgramFiles
+    try {
+      process.env.ProgramFiles = "X:\\PF"
+      expect(defaultProbe.commonPaths()).toContain(join("X:\\PF", "WinMerge", "WinMergeU.exe"))
+    } finally {
+      // 环境变量是全局的，改完必须还原，避免污染同进程的其它用例。
+      if (old === undefined) delete process.env.ProgramFiles
+      else process.env.ProgramFiles = old
+    }
+  })
+})
+
 describe("WINMERGE_ARGS / launchWinMerge", () => {
   it("参数顺序：/s /e /u 在路径之前，左在右之前", () => {
     expect(WINMERGE_ARGS("L.txt", "R.txt")).toEqual(["/s", "/e", "/u", "L.txt", "R.txt"])
@@ -213,6 +250,7 @@ describe("WINMERGE_ARGS / launchWinMerge", () => {
 
   it("detached 启动、不等待，且把参数原样传给 exe", async () => {
     const calls: { exe: string; args: string[]; options: unknown }[] = []
+    let unrefCalled = false
     const fakeSpawn = ((exe: string, args: string[], options: unknown) => {
       calls.push({ exe, args, options })
       return {
@@ -220,14 +258,19 @@ describe("WINMERGE_ARGS / launchWinMerge", () => {
           if (event === "spawn") handler()
           return this
         },
-        unref() {},
+        unref() {
+          unrefCalled = true
+        },
       }
     }) as unknown as typeof spawn
 
     await launchWinMerge("C:\\W\\WinMergeU.exe", "L", "R", fakeSpawn)
     expect(calls[0].exe).toBe("C:\\W\\WinMergeU.exe")
     expect(calls[0].args).toEqual(["/s", "/e", "/u", "L", "R"])
-    expect((calls[0].options as { detached: boolean }).detached).toBe(true)
+    const options = calls[0].options as { detached: boolean; stdio: string }
+    expect(options.detached).toBe(true)
+    expect(options.stdio).toBe("ignore")
+    expect(unrefCalled).toBe(true)
   })
 
   it("spawn 报错 → WinMergeError(launch_failed)", async () => {
@@ -239,6 +282,8 @@ describe("WINMERGE_ARGS / launchWinMerge", () => {
       unref() {},
     })) as unknown as typeof spawn
 
-    await expect(launchWinMerge("C:\\W\\W.exe", "L", "R", fakeSpawn)).rejects.toThrow(/拒绝访问/)
+    const error = await launchWinMerge("C:\\W\\W.exe", "L", "R", fakeSpawn).catch((e) => e)
+    expect(error).toBeInstanceOf(WinMergeError)
+    expect((error as WinMergeError).reason).toBe("launch_failed")
   })
 })
