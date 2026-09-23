@@ -27,6 +27,7 @@ export interface RenderContext {
   diff: DiffView | null
   onToggle: (path: string, checked: boolean) => void
   onSelect: (path: string) => void
+  onOpenInWinMerge: (path: string) => void
 }
 
 const NUMBER = new Intl.NumberFormat("zh-CN")
@@ -77,6 +78,11 @@ export function render(state: UiState, elements: Elements, ctx: RenderContext): 
       row.addEventListener("click", (event) => {
         if (event.target === box) return
         ctx.onSelect(change.path)
+      })
+      // 双击 = 用 WinMerge 对比（点勾选框不算，否则会和勾选打架）
+      row.addEventListener("dblclick", (event) => {
+        if (event.target === box) return
+        ctx.onOpenInWinMerge(change.path)
       })
       row.append(cell)
 

@@ -70,6 +70,7 @@ function paint(): void {
       paint()
       void loadDiff(path)
     },
+    onOpenInWinMerge: (path) => void openInWinMerge(path),
   })
 }
 
@@ -110,6 +111,11 @@ async function loadDiff(path: string): Promise<void> {
     showError(result.error.message)
   }
   paint()
+}
+
+async function openInWinMerge(path: string): Promise<void> {
+  const result = await api.winmergeOpen(path)
+  if (!result.ok) showError(result.error.message)
 }
 
 async function refresh(): Promise<void> {
