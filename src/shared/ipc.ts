@@ -12,6 +12,7 @@ export const CHANNELS = {
   configGet: "config:get",
   configSave: "config:save",
   themesList: "themes:list",
+  winmergeOpen: "winmerge:open",
 } as const
 
 export interface DiffView {
@@ -42,4 +43,5 @@ export interface IpcApi {
   configGet(): Promise<Result<AppConfig>>
   configSave(partial: Record<string, unknown>): Promise<Result<AppConfig>>
   themesList(): Promise<Result<ThemeInfo[]>>
+  winmergeOpen(path: string): Promise<Result<void>>
 }

@@ -21,6 +21,8 @@ export type ErrorCode =
   | "AI_HTTP"
   | "AI_BAD_RESPONSE"
   | "CONFIG_WRITE"
+  | "WINMERGE_NOT_FOUND"
+  | "WINMERGE_LAUNCH_FAILED"
   | "UNKNOWN"
 
 /** IPC 一律返回判别联合，不抛异常（Electron 对 Error 的序列化会丢字段）。 */

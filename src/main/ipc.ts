@@ -1,8 +1,11 @@
+import { join } from "node:path"
+
 import { ipcMain, type BrowserWindow } from "electron"
 
 import { AIError, generateCommitMessage } from "../core/ai"
 import { deepMerge, loadConfig, saveConfig } from "../core/config"
 import { parseDiff } from "../core/diff"
+import { toError } from "../core/errors"
 import { GitError } from "../core/gitcmd"
 import { PathError, resolveInsideRepo } from "../core/paths"
 import {
@@ -16,27 +19,20 @@ import {
   stage,
 } from "../core/repo"
 import type { ErrorCode, Result } from "../core/types"
+import {
+  WinMergeError,
+  comparePlan,
+  detectWinMerge,
+  launchWinMerge,
+  notFoundMessage,
+  prepareComparison,
+  stageRoot,
+} from "../core/winmerge"
 import { CHANNELS, type CommitInput, type DiffView } from "../shared/ipc"
 import { listThemes } from "./themes"
 
 function fail(code: ErrorCode, message: string): { ok: false; error: { code: ErrorCode; message: string } } {
   return { ok: false, error: { code, message } }
-}
-
-/** core 的异常 → IPC 错误码。 */
-export function toError(error: unknown): { code: ErrorCode; message: string } {
-  if (error instanceof GitError) {
-    if (error.reason === "not_found") return { code: "GIT_NOT_FOUND", message: error.message }
-    if (error.reason === "timeout") return { code: "GIT_TIMEOUT", message: error.message }
-    return { code: "GIT_FAILED", message: error.message }
-  }
-  if (error instanceof PathError) return { code: "PATH_OUTSIDE_REPO", message: error.message }
-  if (error instanceof AIError) {
-    if (error.message.includes("未配置 api.url")) return { code: "AI_NO_URL", message: error.message }
-    if (/^AI 返回 \d+/.test(error.message)) return { code: "AI_HTTP", message: error.message }
-    return { code: "AI_BAD_RESPONSE", message: error.message }
-  }
-  return { code: "UNKNOWN", message: error instanceof Error ? error.message : String(error) }
 }
 
 async function guarded<T>(fn: () => Promise<T>): Promise<Result<T>> {
@@ -54,6 +50,9 @@ function toStringArray(raw: unknown): string[] {
 
 /** 同一时刻只允许一次 AI 生成；取消按钮中止它。 */
 let generation: AbortController | null = null
+
+/** 每次双击递增，保证临时目录互不覆盖 */
+let winmergeSeq = 0
 
 export function registerIpc(win: BrowserWindow, repoRoot: string): void {
   const handle = (channel: string, listener: (...args: unknown[]) => Promise<Result<unknown>>): void => {
@@ -128,6 +127,25 @@ export function registerIpc(win: BrowserWindow, repoRoot: string): void {
       const partial = (rawPartial ?? {}) as Record<string, unknown>
       saveConfig(deepMerge(loadConfig(), partial))
       return loadConfig()
+    }),
+  )
+
+  handle(CHANNELS.winmergeOpen, (rawPath) =>
+    guarded(async () => {
+      if (typeof rawPath !== "string") throw new PathError("winmerge:open 需要字符串路径")
+      const worktreePath = resolveInsideRepo(repoRoot, rawPath)
+      const changes = await listChanges(repoRoot)
+      const change = changes.find((item) => item.path === rawPath)
+      if (!change) throw new PathError("变更列表已过期，请按 F5 刷新后重试。")
+
+      const config = loadConfig()
+      const exe = detectWinMerge(config.tools.winmerge_path)
+      if (!exe) throw new WinMergeError(notFoundMessage(config.tools.winmerge_path), "not_found")
+
+      const stageDir = join(stageRoot(process.pid), String(++winmergeSeq))
+      const files = await prepareComparison(repoRoot, comparePlan(change, worktreePath, stageDir))
+      await launchWinMerge(exe, files.left, files.right)
+      return undefined
     }),
   )
 

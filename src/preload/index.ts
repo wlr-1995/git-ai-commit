@@ -11,6 +11,7 @@ const api: IpcApi = {
   configGet: () => ipcRenderer.invoke(CHANNELS.configGet),
   configSave: (partial) => ipcRenderer.invoke(CHANNELS.configSave, partial),
   themesList: () => ipcRenderer.invoke(CHANNELS.themesList),
+  winmergeOpen: (path: string) => ipcRenderer.invoke(CHANNELS.winmergeOpen, path),
 }
 
 contextBridge.exposeInMainWorld("api", api)
