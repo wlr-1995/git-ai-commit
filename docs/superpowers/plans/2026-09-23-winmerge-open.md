@@ -351,7 +351,7 @@ export async function prepareComparison(
   plan: StagePlan,
 ): Promise<{ left: string; right: string }> {
   mkdirSync(dirname(plan.leftPath), { recursive: true })
-  let bytes = Buffer.alloc(0)
+  let bytes: Buffer = Buffer.alloc(0)
   if (plan.leftFromHead) {
     const result = await runGit(["show", plan.leftFromHead], { cwd: repoRoot, check: false })
     if (result.code === 0) bytes = result.stdoutBuffer
@@ -568,10 +568,10 @@ export interface WinMergeProbe {
 
 export const defaultProbe: WinMergeProbe = {
   exists: (path) => existsSync(path),
-  registryInstallLocations: () => {
+  registryInstallLocations: (run: RegRunner = defaultRegRunner) => {
     const found: string[] = []
     for (const key of REG_KEYS) {
-      const location = defaultRegRunner(key)
+      const location = run(key)
       if (location) found.push(location)
     }
     return found
