@@ -733,10 +733,12 @@ git commit -m "feat(config): add tools.winmerge_path"
 ### Task 5: IPC 接线
 
 **Files:**
+- Create: `src/core/errors.ts`（把 `toError` 从 `src/main/ipc.ts` 搬过来）
 - Modify: `src/shared/ipc.ts`（`CHANNELS`、`IpcApi`）
+- Modify: `src/preload/index.ts`（**接口与它的唯一实现必须同一次提交**，否则这一步过后 `npm run typecheck` 会因 `IpcApi` 缺实现而失败，留下一个 typecheck 过不了的提交）
 - Modify: `src/core/types.ts:12-24`（`ErrorCode` 加两个码）
 - Modify: `src/main/ipc.ts`（`toError` 映射 + 新 handler）
-- Test: `tests/core/ipc-errors.test.ts`（新建，只测纯函数 `toError`；handler 由 Task 9 的 E2E 覆盖）
+- Test: `tests/core/errors.test.ts`（新建，只测纯函数 `toError`；handler 由 Task 9 的 E2E 覆盖）
 
 **Interfaces:**
 - Consumes: Task 2/3 的 `comparePlan`、`prepareComparison`、`detectWinMerge`、`launchWinMerge`、`stageRoot`、`notFoundMessage`、`WinMergeError`；Task 4 的 `config.tools.winmerge_path`
@@ -851,6 +853,12 @@ export const CHANNELS = {
   winmergeOpen(path: string): Promise<Result<void>>
 ```
 
+`src/preload/index.ts` 的 `api` 对象里追加一行（**必须在这一次提交里**，否则 typecheck 会报 `Property 'winmergeOpen' is missing in type '{...}' but required in type 'IpcApi'`）：
+
+```ts
+  winmergeOpen: (path: string) => ipcRenderer.invoke(CHANNELS.winmergeOpen, path),
+```
+
 `src/main/ipc.ts`：import 增加
 
 ```ts
@@ -912,27 +920,18 @@ git commit -m "feat(ipc): winmerge:open channel"
 
 ---
 
-### Task 6: preload + 渲染层双击
+### Task 6: 渲染层双击接线
 
 **Files:**
-- Modify: `src/preload/index.ts:5-14`
 - Modify: `src/renderer/render.ts:24-30`（`RenderContext`）、`src/renderer/render.ts:77-80`（行事件）
 - Modify: `src/renderer/main.ts:57-74`（`paint` 传回调）、`src/renderer/main.ts`（新增 `openInWinMerge`）
 - Test: `tests/renderer/` 无（双击行为由 Task 9 的 E2E 覆盖）
 
 **Interfaces:**
-- Consumes: Task 5 的 `api.winmergeOpen`
+- Consumes: Task 5 的 `api.winmergeOpen`（preload 已在 Task 5 里一并接好，本任务不再碰 preload）
 - Produces: `RenderContext.onOpenInWinMerge: (path: string) => void`
 
-- [ ] **Step 1: preload 暴露接口**
-
-`src/preload/index.ts` 的 `api` 对象里追加一行：
-
-```ts
-  winmergeOpen: (path: string) => ipcRenderer.invoke(CHANNELS.winmergeOpen, path),
-```
-
-- [ ] **Step 2: 渲染层加双击回调**
+- [ ] **Step 1: 渲染层加双击回调**
 
 `src/renderer/render.ts` 的 `RenderContext` 接口追加：
 
@@ -950,7 +949,7 @@ git commit -m "feat(ipc): winmerge:open channel"
       })
 ```
 
-- [ ] **Step 3: main.ts 接线**
+- [ ] **Step 2: main.ts 接线**
 
 `src/renderer/main.ts` 的 `paint()` 里，`onSelect` 之后追加：
 
@@ -967,15 +966,15 @@ async function openInWinMerge(path: string): Promise<void> {
 }
 ```
 
-- [ ] **Step 4: 类型检查确认没有漏接线**
+- [ ] **Step 3: 类型检查确认没有漏接线**
 
 Run: `npm run typecheck`
 Expected: 无输出（exit 0）。若报 `Property 'onOpenInWinMerge' is missing`，说明还有别处构造 `RenderContext`（目前只有 `paint()` 一处）。
 
-- [ ] **Step 5: 提交**
+- [ ] **Step 4: 提交**
 
 ```bash
-git add src/preload/index.ts src/renderer/render.ts src/renderer/main.ts
+git add src/renderer/render.ts src/renderer/main.ts
 git commit -m "feat(ui): double-click a row to open WinMerge"
 ```
 
