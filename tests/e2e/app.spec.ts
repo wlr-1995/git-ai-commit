@@ -109,6 +109,15 @@ test("③ AI 生成填入提交信息并剥离 <think>", async () => {
   expect(calls).toHaveLength(1)
   expect((calls[0] as { model: string }).model).toBe("m")
 
+  // 真实链路发出去的提示词必须是新的结构化版本，且 diff 作为 user 消息
+  const messages = (calls[0] as { messages: { role: string; content: string }[] }).messages
+  expect(messages[0].role).toBe("system")
+  expect(messages[0].content).toContain("Conventional Commits")
+  expect(messages[0].content).toContain("<type>(<范围>): <描述>")
+  expect(messages[1].role).toBe("user")
+  expect(messages[1].content).toContain("diff --git a/tracked.txt b/tracked.txt")
+  expect(messages[1].content).toContain("+v2")
+
   await app.close()
   server.close()
 })

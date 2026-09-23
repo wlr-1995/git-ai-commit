@@ -27,15 +27,37 @@ export function stripThink(text: string): string {
   return text.replace(THINK_RE, "").trim()
 }
 
-/** 自定义提示词优先，否则按语言生成默认提示词。 */
+const COMMIT_TYPES = "feat、fix、docs、style、refactor、perf、test、build、ci、chore、revert"
+
+/**
+ * 默认系统提示词：Conventional Commits + 描述用配置语言 + 只在改动较大时给要点。
+ *
+ * 提示词里显式交代了 diff 的三处工具语义，模型才不会把工具生成的说明当代码：
+ * `### ` 说明行、被截断的标记、以及「只看得到这些文件」。
+ */
 export function buildPrompt(cfg: { prompt?: string; language?: string }): string {
   const custom = (cfg.prompt ?? "").trim()
   if (custom) return custom
   const language = cfg.language || "中文"
-  return (
-    "你是一个专业程序员。请根据提供的 git diff 生成一条简洁、准确的提交信息，" +
-    `使用${language}，只输出提交信息本身，不要输出解释、引号或 markdown 标记。`
-  )
+  return `你是提交信息生成器。阅读给定的 git diff（可能包含多个文件），写一条提交信息。
+
+## 格式（Conventional Commits）
+<type>(<范围>): <描述>
+- type 只能取：${COMMIT_TYPES}
+- 范围可选：用改动最集中的模块/目录/文件名，不要发明 diff 里没有的名字
+- 描述用${language}，动宾结构，说清「做了什么」；原因只在它不明显时才补一句
+- 整条标题不超过 50 个字符，行尾不加句号，不加编号或方括号
+- 示例：fix(配置): 旧默认窗口尺寸导致分栏折叠
+
+## 正文（仅在必要时）
+- 只有改动涉及多个文件、多个关注点，或原因不显而易见时，才在标题后空一行写正文
+- 正文用 \`- \` 列出关键改动，最多 5 条，每条一句话，不重复标题已说的内容
+
+## 硬性要求
+- 只输出提交信息本身：不要引号、不要 markdown 标记、不要代码块、不要「以下是…」之类的前后缀
+- 不要编造 diff 里没有的信息：issue 号、票号、测试结果、性能数字
+- diff 中以 \`### \` 开头的行是工具生成的说明（新增文件、过大跳过、疑似二进制、已截断），不是代码内容
+- diff 被截断时，只概括看得见的部分；diff 里没有的文件一概不提`
 }
 
 export interface GenerateOptions {

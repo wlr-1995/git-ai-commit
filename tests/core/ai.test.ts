@@ -54,6 +54,27 @@ describe("buildPrompt", () => {
   it("未配置语言时默认中文", () => {
     expect(buildPrompt({ prompt: "", language: "" })).toContain("中文")
   })
+
+  it("默认提示词规定 Conventional Commits、长度上限与可用 type", () => {
+    const prompt = buildPrompt(CFG)
+    expect(prompt).toContain("Conventional Commits")
+    expect(prompt).toContain("<type>(<范围>): <描述>")
+    expect(prompt).toContain("50 个字符")
+    for (const type of ["feat", "fix", "refactor", "chore", "revert"]) {
+      expect(prompt).toContain(type)
+    }
+  })
+
+  it("默认提示词交代了 diff 的工具语义（### 说明行与截断）", () => {
+    const prompt = buildPrompt(CFG)
+    expect(prompt).toContain("### ")
+    expect(prompt).toContain("截断")
+    expect(prompt).toContain("不要编造")
+  })
+
+  it("语言配置生效（描述语言跟随配置）", () => {
+    expect(buildPrompt({ prompt: "", language: "English" })).toContain("描述用English")
+  })
 })
 
 describe("generateCommitMessage", () => {

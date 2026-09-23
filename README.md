@@ -82,7 +82,7 @@ pwsh -NoProfile -File install\uninstall.ps1    # 移除右键菜单
 - **快捷键**：`F5` 刷新；`Ctrl+,` 打开设置；表格聚焦时 `A` 全选 / `N` 全不选 / `U` 切换未跟踪开关；`Esc` 关闭弹层
 - **设置**在顶栏右上角（次级工具，图标按钮）；打开设置也可按 `Ctrl+,`
 - **diff 面板**：加行淡绿、删行淡红、`@@` 行灰底；行首保留 `+` / `-` 前缀（不只靠颜色）；只显示文本前 `git.max_diff_lines` 行并在标题处标注「已截断」；二进制与超大未跟踪文件给出说明条而不是乱码
-- **AI 生成**：按勾选的改动调用 OpenAI 兼容接口（`/chat/completions`），结果填进输入框可继续编辑；生成中可取消；失败弹层提示且不清空你已写的内容
+- **AI 生成**：按勾选的改动调用 OpenAI 兼容接口（`/chat/completions`），结果填进输入框可继续编辑；生成中可取消；失败弹层提示且不清空你已写的内容。默认要求 **Conventional Commits** 格式（`feat(范围): 中文描述`，标题 ≤ 50 字，改动大时补 `- ` 要点），并明确告诉模型 diff 里的 `### ` 说明行、截断标记不是代码，避免瞎编 issue 号/测试结果
 - **提交**：只提交勾选的路径（重命名会自动带上旧路径，避免旧文件删除被留在暂存区）；提交不可取消，提交中关闭窗口会被拦下并提示「正在提交，请稍候…」
 - 所有 git / AI 调用都在主进程异步执行，界面不会卡住
 
@@ -95,7 +95,7 @@ pwsh -NoProfile -File install\uninstall.ps1    # 移除右键菜单
 | `api.url` | `http://localhost:11434/v1` | OpenAI 兼容接口地址，会拼 `/chat/completions` |
 | `api.api_key` | `ollama` | 请求头 `Authorization: Bearer <key>` |
 | `api.model` | `qwen2.5-coder:7b` | 模型名 |
-| `api.prompt` | `""` | 自定义提示词；为空则按 `api.language` 生成默认提示词 |
+| `api.prompt` | `""` | 自定义提示词；为空则用内置默认（Conventional Commits + `api.language` 指定描述语言 + 改动大才给要点） |
 | `api.max_tokens` | `8192` | 大于 0 才随请求发送 |
 | `api.language` | `中文` | 默认提示词里要求的输出语言 |
 | `api.timeout` | `60` | 请求超时（秒），设置界面限制 1–600 |
