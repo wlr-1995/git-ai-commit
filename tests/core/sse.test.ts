@@ -107,4 +107,32 @@ describe("readSseStream", () => {
     await expect(reading).resolves.toMatchObject({ dataEvents: 1 })
     expect(events).toEqual(['{"a":1}'])
   })
+
+  it("中止时正在解析的半行不得被当作事件发出", async () => {
+    const controller = new AbortController()
+    // 只给半行（没有换行），之后永不结束
+    const stream = new ReadableStream<Uint8Array>({
+      start(ctrl) {
+        ctrl.enqueue(new TextEncoder().encode('data: {"a":'))
+      },
+    })
+    const events: string[] = []
+    const reading = readSseStream(stream, (data) => events.push(data), { signal: controller.signal })
+    // 先让这半行进入待解析缓冲，再中止
+    await Promise.resolve()
+    controller.abort()
+    await expect(reading).resolves.toMatchObject({ dataEvents: 0 })
+    expect(events).toEqual([])
+  })
+
+  it("传入已中止的 signal：永不结束的流也立即返回空结果", async () => {
+    const controller = new AbortController()
+    controller.abort()
+    // 既不 enqueue 也不 close，若未检查 aborted 就会永远挂住
+    const stream = new ReadableStream<Uint8Array>({ start() {} })
+    const events: string[] = []
+    const result = await readSseStream(stream, (data) => events.push(data), { signal: controller.signal })
+    expect(result).toMatchObject({ dataEvents: 0 })
+    expect(events).toEqual([])
+  })
 })

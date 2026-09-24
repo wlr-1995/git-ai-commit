@@ -30,8 +30,10 @@ export async function readSseStream(
   let raw = ""
   let dataEvents = 0
   let stopped = false
+  let aborted = false
 
   const onAbort = (): void => {
+    aborted = true
     void reader.cancel().catch(() => {})
   }
   options.signal?.addEventListener("abort", onAbort, { once: true })
@@ -51,6 +53,12 @@ export async function readSseStream(
   }
 
   try {
+    // 已 abort 的 signal 不会补发事件：立即取消读流并返回空结果，
+    // 否则永不 close 的流会让下面的 read() 一直挂住
+    if (options.signal?.aborted) {
+      await reader.cancel().catch(() => {})
+      return { dataEvents, raw }
+    }
     for (;;) {
       const { value, done } = await reader.read()
       if (done) break
@@ -67,15 +75,20 @@ export async function readSseStream(
       if (stopped) break
       if (options.signal?.aborted) break
     }
-    // 流结束时把解码器与最后一行（可能没有换行）都冲刷掉
-    const rest = decoder.decode()
-    if (rest !== "") {
-      raw += rest
-      pending += rest
+    // 流结束时把解码器与最后一行（可能没有换行）都冲刷掉；
+    // 但中止时不行：正在解析的半行不是完整事件，冲刷会把它当成事件发出
+    if (!aborted) {
+      const rest = decoder.decode()
+      if (rest !== "") {
+        raw += rest
+        pending += rest
+      }
+      if (!stopped && pending !== "") handleLine(pending)
     }
-    if (!stopped && pending !== "") handleLine(pending)
   } finally {
     options.signal?.removeEventListener("abort", onAbort)
+    // 无论 [DONE]、自然结束还是中止，都释放读锁，别把 HTTP body 流留在锁定态
+    void reader.cancel().catch(() => {})
   }
 
   return { dataEvents, raw }
