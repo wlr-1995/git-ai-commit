@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process"
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
-import { createServer } from "node:http"
+import { createServer, type Server } from "node:http"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -31,6 +31,45 @@ function makeConfig(overrides: Record<string, unknown> = {}): string {
   const file = join(dir, "config.json")
   writeFileSync(file, JSON.stringify(overrides), "utf8")
   return file
+}
+
+/**
+ * 假 SSE 服务：handler 拿到 send/finish/done 逐块推 delta。
+ * 不调用 done() 就是「连接一直挂着」——用来断言流式中间态，避免用 sleep 抢时序。
+ */
+function streamServer(
+  handler: (ctx: {
+    send: (delta: Record<string, unknown>) => void
+    finish: (reason?: string) => void
+    done: () => void
+  }) => void,
+  calls: unknown[] = [],
+): Promise<{ server: Server; url: string }> {
+  const server = createServer((req, res) => {
+    const chunks: Buffer[] = []
+    req.on("data", (chunk: Buffer) => chunks.push(chunk))
+    req.on("end", () => {
+      calls.push(JSON.parse(Buffer.concat(chunks).toString("utf8")))
+      res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache" })
+      const send = (delta: Record<string, unknown>): void => {
+        res.write(`data: ${JSON.stringify({ choices: [{ delta }] })}\n\n`)
+      }
+      const finish = (reason = "stop"): void => {
+        res.write(`data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: reason }] })}\n\n`)
+      }
+      const done = (): void => {
+        res.write("data: [DONE]\n\n")
+        res.end()
+      }
+      handler({ send, finish, done })
+    })
+  })
+  return new Promise((resolve) => {
+    server.listen(0, "127.0.0.1", () => {
+      const port = (server.address() as { port: number }).port
+      resolve({ server, url: `http://127.0.0.1:${port}/v1` })
+    })
+  })
 }
 
 /**
@@ -209,34 +248,31 @@ test("② 勾选并提交只包含勾选的文件", async () => {
   await app.close()
 })
 
-test("③ AI 生成填入提交信息并剥离 <think>", async () => {
+test("③ AI 生成：思考进思考区、正文进输入框（SSE，标签跨 chunk）", async () => {
   const repo = makeRepo()
   const calls: unknown[] = []
-  const server = createServer((req, res) => {
-    const chunks: Buffer[] = []
-    req.on("data", (chunk: Buffer) => chunks.push(chunk))
-    req.on("end", () => {
-      calls.push(JSON.parse(Buffer.concat(chunks).toString("utf8")))
-      res.writeHead(200, { "Content-Type": "application/json" })
-      res.end(JSON.stringify({ choices: [{ message: { content: "<think>推理过程</think>修复 tracked 文件" } }] }))
-    })
-  })
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
-  const port = (server.address() as { port: number }).port
-  const configFile = makeConfig({ api: { url: `http://127.0.0.1:${port}/v1`, api_key: "k", model: "m" } })
+  const { server, url } = await streamServer(({ send, finish, done }) => {
+    send({ content: "<thi" })
+    send({ content: "nk>先看 diff。</think>fix(tracked): 修好" })
+    finish()
+    done()
+  }, calls)
+  const configFile = makeConfig({ api: { url, api_key: "k", model: "m" } })
 
   const app = await launchApp({ repo, configFile })
   const window = await app.firstWindow()
   await window.waitForSelector("#changes-body tr")
   await window.click("#btn-generate")
 
-  await expect(window.locator("#message")).toHaveValue("修复 tracked 文件")
+  await expect(window.locator("#message")).toHaveValue("fix(tracked): 修好")
+  await expect(window.locator("#thinking")).toBeVisible()
+  await expect(window.locator("#thinking-body")).toHaveText("先看 diff。")
   await expect(window.locator("#status")).toContainText("已生成")
-  expect(calls).toHaveLength(1)
-  expect((calls[0] as { model: string }).model).toBe("m")
 
   // 真实链路发出去的提示词必须是新的结构化版本，且 diff 作为 user 消息
   const messages = (calls[0] as { messages: { role: string; content: string }[] }).messages
+  expect((calls[0] as { model: string }).model).toBe("m")
+  expect((calls[0] as { stream: boolean }).stream).toBe(true)
   expect(messages[0].role).toBe("system")
   expect(messages[0].content).toContain("Conventional Commits")
   expect(messages[0].content).toContain("<type>(<范围>): <描述>")
@@ -357,4 +393,84 @@ test("⑥ 不是 git 仓库时报错并以非 0 退出", async () => {
   const proc = app.process()
   const code = await new Promise<number | null>((resolve) => proc.once("exit", (value) => resolve(value)))
   expect(code).not.toBe(0)
+})
+
+test("⑫ 流式：思考与正文边收边显示，生成中输入框只读", async () => {
+  const repo = makeRepo()
+  // 只发两块就不结束（连接挂着）→ 中间态可稳定断言，不靠 sleep 抢时序
+  const { server, url } = await streamServer(({ send }) => {
+    send({ reasoning_content: "先看改动。" })
+    send({ content: "fix: 流式" })
+  })
+  const configFile = makeConfig({ api: { url, api_key: "k", model: "m" } })
+
+  const app = await launchApp({ repo, configFile })
+  const window = await app.firstWindow()
+  await window.waitForSelector("#changes-body tr")
+  await window.click("#btn-generate")
+
+  await expect(window.locator("#thinking-body")).toHaveText("先看改动。")
+  await expect(window.locator("#thinking")).toBeVisible()
+  await expect(window.locator("#message")).toHaveValue("fix: 流式")
+  await expect(window.locator("#message")).toHaveAttribute("readonly", "")
+  await expect(window.locator("#btn-cancel")).toBeEnabled()
+
+  await app.close()
+  server.close()
+})
+
+test("⑬ 取消：不弹错误弹层，且保留已收到的思考与正文", async () => {
+  const repo = makeRepo()
+  const { server, url } = await streamServer(({ send }) => {
+    send({ reasoning_content: "想了半截" })
+    send({ content: "fix: 半截" })
+  })
+  const configFile = makeConfig({ api: { url, api_key: "k", model: "m" } })
+
+  const app = await launchApp({ repo, configFile })
+  const window = await app.firstWindow()
+  await window.waitForSelector("#changes-body tr")
+  await window.click("#btn-generate")
+  await expect(window.locator("#message")).toHaveValue("fix: 半截")
+
+  await window.click("#btn-cancel")
+
+  await expect(window.locator("#status")).toContainText("已取消")
+  await expect(window.locator(".modal-backdrop")).toBeHidden()
+  await expect(window.locator("#thinking-body")).toHaveText("想了半截")
+  await expect(window.locator("#message")).toHaveValue("fix: 半截")
+  await expect(window.locator("#message")).not.toHaveAttribute("readonly", "")
+
+  await app.close()
+  server.close()
+})
+
+test("⑭ 服务端返回非流式 JSON：照常生成，思考进思考区，截断有提示", async () => {
+  const repo = makeRepo()
+  const server = createServer((req, res) => {
+    req.resume()
+    req.on("end", () => {
+      res.writeHead(200, { "Content-Type": "application/json" })
+      res.end(
+        JSON.stringify({
+          choices: [{ message: { content: "<think>想过</think>fix: 半截" }, finish_reason: "length" }],
+        }),
+      )
+    })
+  })
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
+  const port = (server.address() as { port: number }).port
+  const configFile = makeConfig({ api: { url: `http://127.0.0.1:${port}/v1`, api_key: "k", model: "m" } })
+
+  const app = await launchApp({ repo, configFile })
+  const window = await app.firstWindow()
+  await window.waitForSelector("#changes-body tr")
+  await window.click("#btn-generate")
+
+  await expect(window.locator("#message")).toHaveValue("fix: 半截")
+  await expect(window.locator("#thinking-body")).toHaveText("想过")
+  await expect(window.locator("#status")).toContainText("截断")
+
+  await app.close()
+  server.close()
 })
