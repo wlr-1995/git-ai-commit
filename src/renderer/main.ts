@@ -51,6 +51,7 @@ let diff: DiffView | null = null
 let repoPath = ""
 let diffRequest = 0
 let themes: ThemeInfo[] = []
+let streamStarted = false
 
 function repoName(): string {
   const parts = repoPath.split(/[\\/]/).filter(Boolean)
@@ -171,6 +172,7 @@ async function generate(): Promise<void> {
   }
   state.busy = "generate"
   state.thinking = ""
+  streamStarted = false
   paint()
   const result = await api.aiGenerate(paths)
   state.busy = null
@@ -192,6 +194,11 @@ async function generate(): Promise<void> {
 
 function applyDelta(delta: AiDelta): void {
   if (state.busy !== "generate") return
+  if (delta.kind === "text" && !streamStarted) {
+    // 第一段正文到达才丢弃草稿：这样「生成失败不清空已写内容」的承诺仍然成立
+    streamStarted = true
+    state.message = ""
+  }
   const next = applyAiDelta(state, delta)
   state.thinking = next.thinking
   state.message = next.message

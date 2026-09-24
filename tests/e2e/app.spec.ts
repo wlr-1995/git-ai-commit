@@ -407,6 +407,7 @@ test("⑫ 流式：思考与正文边收边显示，生成中输入框只读", a
   const app = await launchApp({ repo, configFile })
   const window = await app.firstWindow()
   await window.waitForSelector("#changes-body tr")
+  await window.fill("#message", "草稿不要留")
   await window.click("#btn-generate")
 
   await expect(window.locator("#thinking-body")).toHaveText("先看改动。")

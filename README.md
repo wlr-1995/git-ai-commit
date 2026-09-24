@@ -100,7 +100,7 @@ pwsh -NoProfile -File install\uninstall.ps1    # 移除右键菜单
 | `api.max_tokens` | `8192` | 大于 0 才随请求发送 |
 | `api.enable_thinking` | `false` | 是否随请求发 `chat_template_kwargs: {enable_thinking: true}`（Qwen3 在 SGLang 上有时需要才吐思考）；默认不发，避免严格服务报 400 |
 | `api.language` | `中文` | 默认提示词里要求的输出语言 |
-| `api.timeout` | `60` | **空闲超时**（秒）：这么久没收到任何数据才算超时；持续有数据就一直生成（思考模型可以调到 300） |
+| `api.timeout` | `60` | **空闲超时**（秒）：这么久没收到任何数据才算超时；持续有数据就一直生成（服务端回整体 JSON 时按整段计时）（思考模型可以调到 300） |
 | `git.max_diff_lines` | `200` | 送给 AI 与 diff 面板共用的最大行数 |
 | `tools.winmerge_path` | `""` | WinMergeU.exe 的路径；留空则自动查注册表与常见安装位置 |
 | `ui.window_width` / `ui.window_height` | `1100` / `640` | 开窗尺寸（最小 560×420） |

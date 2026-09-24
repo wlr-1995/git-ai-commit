@@ -155,7 +155,7 @@ export class AIError extends Error {
   - **非流式** ＝ `Content-Type` 含 `application/json` **或**响应没有 `body` → 整体 `json()`，复用现有 `choices[0].message` 解析，把 `reasoning_content` / 内联 `<think>` 各发一次 `onDelta`（**非流式也不再静默丢弃思考**）；
   - 否则（`text/event-stream`）→ 走 SSE（§4.1），每个 `delta` 交给 §4.4 路由；
   - 兜底：`event-stream` 但整条流一个 `data:` 都没收到（`dataEvents === 0`）→ 把累积的 `raw` 当 JSON 再试一次（覆盖 content-type 乱写的服务）。
-- 返回值仍是最终正文 `string`（= 流式累积的 text，两者按构造一致）。
+- 返回值仍是最终正文 `string`（= 流式累积的 text，两者按构造一致）。注意返回值经 `.trim()` 处理（`src/core/ai.ts` 末尾 `state.text.trim()`），而流式增量推给 `onDelta` 的 text 是不 trim 的。
 - `AiConfig.enable_thinking?: boolean` 是**可选**字段（缺省＝不发，既有单测的最小配置不用改）；`AppConfig.api.enable_thinking` 才是必填、有默认值（§6）。
 - `finish_reason` 经 `onFinish` 回报，**返回值仍是 `string`**——这样既有约 10 处 `expect(await generateCommitMessage(...)).toBe(...)` 断言无需改动。
 - `onDelta` 可不传（单测/其它调用方），不传就丢弃增量。
@@ -204,7 +204,7 @@ export class AIError extends Error {
   - `generate()` 开头 `state.thinking = ""`（每次生成重置，避免上一轮思考残留）；`state.message` 保持现状（会被流式正文逐步覆盖）；
   - `generate()` 成功后**用返回值对账**：`state.message = result.value.message`、`state.thinking = result.value.thinking`（非流式 JSON 下迟到的 `ai:delta` 可能被 `busy` 门丢弃，这里兜底自愈；**不得**用 `setImmediate` / sleep 之类的时序手法替代）；
   - 启动时 `api.onAiDelta((delta) => { const next = applyAiDelta(state, delta); state.thinking = next.thinking; state.message = next.message; paint() })`（`applyDelta` 里仍保留 `state.busy === "generate"` 门）。
-  - **门的角色已退化**：它不再是「思考不丢」的正确性保证，而只是「**旧 run 的迟到增量不得污染新一轮**」的护栏；思考的最终正确性由上面的返回值对账兜底（§5.2 与验收标准 4）。
+  - **门的角色已退化**：它不再是「思考不丢」的正确性保证，而只是「**旧 run 的迟到增量不得污染新一轮**」的护栏；思考的最终正确性由上面的返回值对账兜底（验收标准 1、3）。
 - `renderer/global.d.ts`：`window.api` 的类型同步加 `onAiDelta`。
 - `renderer/render.ts`：
   - `#thinking` 的 `hidden` = `state.thinking === ""`；文本用 `textContent` 写入 `#thinking-body`；
@@ -235,7 +235,7 @@ export class AIError extends Error {
 |---|---|
 | 用户点取消 | abort → `AI_CANCELLED` → 状态栏「已取消（已保留已收到内容）」；**保留**已到的思考与正文；不弹框 |
 | 空闲超时 | 弹错误框（原因明确）；**保留**已到的思考与正文（不清空） |
-| 网络中断 / 服务端提前关闭 | 已收到内容 → 正常收尾但状态栏提示「连接提前结束，内容可能不完整」；一个 chunk 都没有 → 报错 |
+| 网络中断 / 服务端提前关闭 | **有意不实现**提前收尾提示：`readSseStream` 在流关闭而未见 `[DONE]` 时按正常结束返回，不区分「正常收尾」与「提前关闭」（要区分须加 `sawDone` 标志）；本轮不做，验收标准也未要求 |
 | HTTP 非 200 | 沿用现状：读 body 前 500 字，报错 |
 | 整条流零有效内容 | `AIError("AI 未返回有效内容")` |
 
@@ -311,7 +311,7 @@ export class AIError extends Error {
 4. 思考内容**绝不**出现在提交信息输入框里，也绝不被提交。
 5. 点「取消」：不弹错误弹层，状态栏「已取消（已保留已收到内容）」，已收到的思考与正文都还在。
 6. 服务端返回非流式（无视 `stream`）时，功能照常可用（思考也进思考区）。
-7. 思考超过 `api.timeout` 秒没有新数据才算超时；持续有数据就一直不被截断。
+7. 思考超过 `api.timeout` 秒没有新数据才算超时；持续有数据就一直不被截断（服务端回整体 JSON 时按整段计时）。
 8. `finish_reason` 为 `length` 时状态栏提示输出被 `max_tokens` 截断。
 9. `api.enable_thinking: true` 时请求体带 `chat_template_kwargs.enable_thinking`；`false`（默认）时不带该字段。
 10. 既有测试全绿：单元 153+ / E2E 14+（含改造后的 ③），`tsc --noEmit` 干净，`src/core` 聚合行覆盖 ≥ 90%。
