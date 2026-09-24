@@ -1,5 +1,7 @@
 import type { FileChange } from "../shared/changes"
 
+export type { AiDelta } from "./ai"
+
 export type StatTuple = [number | null, number | null]
 
 export interface RepoSnapshot {
@@ -20,6 +22,7 @@ export type ErrorCode =
   | "AI_NO_URL"
   | "AI_HTTP"
   | "AI_BAD_RESPONSE"
+  | "AI_CANCELLED"
   | "CONFIG_WRITE"
   | "WINMERGE_NOT_FOUND"
   | "WINMERGE_LAUNCH_FAILED"

@@ -23,4 +23,14 @@ describe("toError", () => {
     expect(toError(new AIError("AI 返回 500：boom")).code).toBe("AI_HTTP")
     expect(toError(new Error("随便")).code).toBe("UNKNOWN")
   })
+
+  it("用户取消 → AI_CANCELLED（渲染层据此不弹错误框）", () => {
+    const mapped = toError(new AIError("已取消", "aborted"))
+    expect(mapped.code).toBe("AI_CANCELLED")
+    expect(mapped.message).toBe("已取消")
+  })
+
+  it("AI 超时不回归成取消（仍是可弹框的错误）", () => {
+    expect(toError(new AIError("AI 请求超时：60 秒内没有收到任何数据", "timeout")).code).toBe("AI_BAD_RESPONSE")
+  })
 })

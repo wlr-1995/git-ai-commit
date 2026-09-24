@@ -13,6 +13,7 @@ export function toError(error: unknown): { code: ErrorCode; message: string } {
   }
   if (error instanceof PathError) return { code: "PATH_OUTSIDE_REPO", message: error.message }
   if (error instanceof AIError) {
+    if (error.reason === "aborted") return { code: "AI_CANCELLED", message: error.message }
     if (error.message.includes("未配置 api.url")) return { code: "AI_NO_URL", message: error.message }
     if (/^AI 返回 \d+/.test(error.message)) return { code: "AI_HTTP", message: error.message }
     return { code: "AI_BAD_RESPONSE", message: error.message }

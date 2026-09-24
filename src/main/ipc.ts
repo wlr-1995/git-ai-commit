@@ -93,8 +93,18 @@ export function registerIpc(win: BrowserWindow, repoRoot: string): void {
       const diffText = await diffFor(repoRoot, paths, config.git.max_diff_lines)
       if (!diffText.trim()) throw new AIError("勾选的文件没有可分析的改动")
       generation = new AbortController()
+      let truncated = false
       try {
-        return { message: await generateCommitMessage(diffText, config.api, { signal: generation.signal }) }
+        const message = await generateCommitMessage(diffText, config.api, {
+          signal: generation.signal,
+          onDelta: (delta) => {
+            if (!win.isDestroyed()) win.webContents.send(CHANNELS.aiDelta, delta)
+          },
+          onFinish: (info) => {
+            truncated = info.finishReason === "length"
+          },
+        })
+        return { message, truncated }
       } finally {
         generation = null
       }

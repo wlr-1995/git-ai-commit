@@ -1,11 +1,14 @@
 import { contextBridge, ipcRenderer } from "electron"
 
-import { CHANNELS, type IpcApi } from "../shared/ipc"
+import { CHANNELS, type AiDelta, type IpcApi } from "../shared/ipc"
 
 const api: IpcApi = {
   repoLoad: () => ipcRenderer.invoke(CHANNELS.repoLoad),
   diffRead: (path: string) => ipcRenderer.invoke(CHANNELS.diffRead, path),
   aiGenerate: (paths: string[]) => ipcRenderer.invoke(CHANNELS.aiGenerate, paths),
+  onAiDelta: (cb) => {
+    ipcRenderer.on(CHANNELS.aiDelta, (_event, delta) => cb(delta as AiDelta))
+  },
   aiCancel: () => ipcRenderer.invoke(CHANNELS.aiCancel),
   commit: (input) => ipcRenderer.invoke(CHANNELS.commit, input),
   configGet: () => ipcRenderer.invoke(CHANNELS.configGet),
