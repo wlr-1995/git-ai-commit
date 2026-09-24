@@ -1,9 +1,37 @@
+import { readSseStream } from "./sse"
+import { createThinkSplitter, type ThinkParts } from "./think"
+
+export type AiErrorReason = "aborted" | "timeout" | "http" | "bad_response" | "network"
+
 export class AIError extends Error {
-  constructor(message: string) {
+  readonly reason: AiErrorReason
+
+  constructor(message: string, reason: AiErrorReason = "bad_response") {
     super(message)
     this.name = "AIError"
+    this.reason = reason
   }
 }
+
+/** 流式增量：思考与正文本就是两条流，用 kind 分开（渲染层各自累积）。 */
+export interface AiDelta {
+  kind: "thinking" | "text"
+  text: string
+}
+
+/**
+ * 只声明用得到的部分；`body` 缺失即视为「非流式」——
+ * 既有单测的假 fetch 不提供 body，因此天然走 JSON 分支。
+ */
+export interface FetchResponseLike {
+  status: number
+  headers?: { get(name: string): string | null } | null
+  text(): Promise<string>
+  json(): Promise<unknown>
+  body?: ReadableStream<Uint8Array> | null
+}
+
+export type FetchLike = (url: string, init: RequestInit) => Promise<FetchResponseLike>
 
 export interface AiConfig {
   url: string
@@ -14,11 +42,6 @@ export interface AiConfig {
   language: string
   timeout: number
 }
-
-export type FetchLike = (
-  url: string,
-  init: RequestInit,
-) => Promise<{ status: number; text(): Promise<string>; json(): Promise<unknown> }>
 
 const THINK_RE = /<think>[\s\S]*?<\/think>/g
 
@@ -63,9 +86,28 @@ export function buildPrompt(cfg: { prompt?: string; language?: string }): string
 export interface GenerateOptions {
   signal?: AbortSignal
   fetchImpl?: FetchLike
+  onDelta?: (delta: AiDelta) => void
+  /** 流结束时的元信息（返回值保持 string，既有调用方不用动） */
+  onFinish?: (info: { finishReason: string | null }) => void
+  /** 空闲超时（毫秒）：超过这么久没收到任何字节才算超时；默认用 cfg.timeout 秒 */
+  idleTimeoutMs?: number
 }
 
-/** 调用 {url}/chat/completions 生成提交信息。 */
+interface StreamState {
+  text: string
+  thinking: string
+  finishReason: string | null
+}
+
+function firstString(source: Record<string, unknown>, keys: string[]): string {
+  for (const key of keys) {
+    const value = source[key]
+    if (typeof value === "string" && value !== "") return value
+  }
+  return ""
+}
+
+/** 调用 {url}/chat/completions 生成提交信息（流式；服务端不支持时自动按整体 JSON 处理）。 */
 export async function generateCommitMessage(
   diffText: string,
   cfg: AiConfig,
@@ -80,7 +122,7 @@ export async function generateCommitMessage(
       { role: "system", content: buildPrompt(cfg) },
       { role: "user", content: diffText },
     ],
-    stream: false,
+    stream: true,
   }
   const maxTokens = cfg.max_tokens || 0
   if (maxTokens > 0) payload.max_tokens = maxTokens
@@ -90,11 +132,30 @@ export async function generateCommitMessage(
     Authorization: `Bearer ${cfg.api_key || ""}`,
   }
 
-  const signals: AbortSignal[] = [AbortSignal.timeout((cfg.timeout ?? 60) * 1000)]
+  // 空闲超时：AbortSignal.timeout 是「总时长」，会把长思考截死在半路，所以自己计时
+  const idleMs = options.idleTimeoutMs ?? (cfg.timeout ?? 60) * 1000
+  const idleText = `AI 请求超时：${Math.round(idleMs / 1000)} 秒内没有收到任何数据`
+  const controller = new AbortController()
+  let timedOut = false
+  let timer: ReturnType<typeof setTimeout> | null = null
+  const armIdle = (): void => {
+    if (timer) clearTimeout(timer)
+    timer = setTimeout(() => {
+      timedOut = true
+      controller.abort()
+    }, idleMs)
+  }
+  const stopIdle = (): void => {
+    if (timer) clearTimeout(timer)
+    timer = null
+  }
+  const signals: AbortSignal[] = [controller.signal]
   if (options.signal) signals.push(options.signal)
-  const fetchImpl: FetchLike = options.fetchImpl ?? ((input, init) => fetch(input, init))
 
-  let response
+  const fetchImpl: FetchLike = options.fetchImpl ?? ((input, init) => fetch(input, init))
+  armIdle()
+
+  let response: FetchResponseLike
   try {
     response = await fetchImpl(`${url}/chat/completions`, {
       method: "POST",
@@ -103,29 +164,128 @@ export async function generateCommitMessage(
       signal: AbortSignal.any(signals),
     })
   } catch (error) {
+    stopIdle()
+    if (timedOut) throw new AIError(idleText, "timeout")
+    if (options.signal?.aborted) throw new AIError("已取消", "aborted")
     // Node 的 fetch 只抛 "fetch failed"，真正的原因（ECONNREFUSED 等）在 cause 里
     const cause = (error as { cause?: { message?: string } }).cause?.message
     const message = cause ?? (error instanceof Error ? error.message : String(error))
-    throw new AIError(`AI 请求失败：${message}`)
+    throw new AIError(`AI 请求失败：${message}`, "network")
   }
 
   if (response.status !== 200) {
+    stopIdle()
     const text = await response.text()
-    throw new AIError(`AI 返回 ${response.status}：${text.slice(0, 500)}`)
+    throw new AIError(`AI 返回 ${response.status}：${text.slice(0, 500)}`, "http")
   }
 
-  let data: unknown
+  const state: StreamState = { text: "", thinking: "", finishReason: null }
+  const splitter = createThinkSplitter()
+  const emit = (kind: AiDelta["kind"], text: string): void => {
+    if (text === "") return
+    options.onDelta?.({ kind, text })
+  }
+  const routeChoice = (choice: unknown): void => {
+    if (!choice || typeof choice !== "object") return
+    const item = choice as {
+      delta?: Record<string, unknown>
+      message?: Record<string, unknown>
+      finish_reason?: string | null
+    }
+    const piece = item.delta ?? item.message
+    if (piece) {
+      const reasoning = firstString(piece, ["reasoning_content", "reasoning"])
+      if (reasoning !== "") {
+        state.thinking += reasoning
+        emit("thinking", reasoning)
+      }
+      const content = firstString(piece, ["content"])
+      if (content !== "") {
+        const parts: ThinkParts = splitter.push(content)
+        if (parts.thinking !== "") {
+          state.thinking += parts.thinking
+          emit("thinking", parts.thinking)
+        }
+        if (parts.text !== "") {
+          state.text += parts.text
+          emit("text", parts.text)
+        }
+      }
+    }
+    if (typeof item.finish_reason === "string") state.finishReason = item.finish_reason
+  }
+  const routeJson = (data: unknown): void => {
+    const choices = (data as { choices?: unknown } | null)?.choices
+    if (!Array.isArray(choices) || choices.length === 0) throw new AIError("AI 返回缺少 choices")
+    for (const choice of choices) routeChoice(choice)
+  }
+  const parseJson = (text: string): unknown => {
+    try {
+      return JSON.parse(text) as unknown
+    } catch {
+      throw new AIError("AI 返回的不是合法 JSON")
+    }
+  }
+  const readJson = async (): Promise<unknown> => {
+    try {
+      return await response.json()
+    } catch {
+      throw new AIError("AI 返回的不是合法 JSON")
+    }
+  }
+  const onData = (data: string): void => {
+    let event: unknown
+    try {
+      event = JSON.parse(data) as unknown
+    } catch {
+      // 心跳/杂质：跳过，别为一条坏帧废掉整条流
+      return
+    }
+    const choices = (event as { choices?: unknown } | null)?.choices
+    if (!Array.isArray(choices)) return
+    for (const choice of choices) routeChoice(choice)
+  }
+
+  const contentType = response.headers?.get("content-type") ?? ""
+  const usesJson = /application\/json/i.test(contentType) || !response.body
+
   try {
-    data = await response.json()
-  } catch {
-    throw new AIError("AI 返回的不是合法 JSON")
+    if (usesJson) {
+      routeJson(await readJson())
+    } else {
+      const { dataEvents, raw } = await readSseStream(
+        response.body as ReadableStream<Uint8Array>,
+        onData,
+        { onActivity: armIdle, signal: controller.signal },
+      )
+      // 服务端把 content-type 写成 event-stream、其实整段是 JSON
+      if (dataEvents === 0) routeJson(parseJson(raw))
+    }
+  } catch (error) {
+    stopIdle()
+    if (timedOut) throw new AIError(idleText, "timeout")
+    if (options.signal?.aborted) throw new AIError("已取消", "aborted")
+    if (error instanceof AIError) throw error
+    throw new AIError(`AI 请求失败：${error instanceof Error ? error.message : String(error)}`, "network")
+  }
+  stopIdle()
+  // 读流被取消（空闲超时）时 read() 是正常收尾而不是抛错，所以这里再确认一次
+  if (timedOut) throw new AIError(idleText, "timeout")
+
+  // 收尾：未决前缀按当前状态归还，避免吞字
+  const tail = splitter.flush()
+  if (tail.thinking !== "") {
+    state.thinking += tail.thinking
+    emit("thinking", tail.thinking)
+  }
+  if (tail.text !== "") {
+    state.text += tail.text
+    emit("text", tail.text)
   }
 
-  const choices = (data as { choices?: unknown } | null)?.choices
-  if (!Array.isArray(choices) || choices.length === 0) throw new AIError("AI 返回缺少 choices")
+  options.onFinish?.({ finishReason: state.finishReason })
 
-  const first = choices[0] as { message?: { content?: string } } | undefined
-  const content = stripThink(first?.message?.content ?? "")
+  const content = state.text.trim()
   if (!content) throw new AIError("AI 未返回有效内容")
   return content
 }

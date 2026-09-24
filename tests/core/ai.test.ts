@@ -85,7 +85,7 @@ describe("generateCommitMessage", () => {
     expect(calls[0].url).toBe("http://localhost:11434/v1/chat/completions")
     expect((calls[0].init.headers as Record<string, string>)["Authorization"]).toBe("Bearer ollama")
     expect(body(calls[0])["model"]).toBe("qwen2.5-coder:7b")
-    expect(body(calls[0])["stream"]).toBe(false)
+    expect(body(calls[0])["stream"]).toBe(true)
     expect(body(calls[0])["max_tokens"]).toBe(8192)
   })
 
@@ -156,20 +156,164 @@ describe("generateCommitMessage", () => {
     await expect(generateCommitMessage("d", CFG, { fetchImpl })).rejects.toThrow("AI 未返回有效内容")
   })
 
-  it("AbortSignal 中止时抛 AI 请求失败", async () => {
+  it("中止时抛 reason 为 aborted 的 AIError（上层据此不弹错误框）", async () => {
     const controller = new AbortController()
     controller.abort()
     const fetchImpl = async () => {
       throw Object.assign(new Error("The operation was aborted"), { name: "AbortError" })
     }
-    await expect(
-      generateCommitMessage("d", CFG, { fetchImpl, signal: controller.signal }),
-    ).rejects.toThrow(/^AI 请求失败：/)
+    await expect(generateCommitMessage("d", CFG, { fetchImpl, signal: controller.signal })).rejects.toMatchObject({
+      reason: "aborted",
+    })
   })
 
   it("url 末尾斜杠被去掉", async () => {
     const { calls, fetchImpl } = fakeFetch({ choices: [{ message: { content: "ok" } }] })
     await generateCommitMessage("d", { ...CFG, url: "http://x/v1/" }, { fetchImpl })
     expect(calls[0].url).toBe("http://x/v1/chat/completions")
+  })
+
+  it("SSE：把思考与正文各自回调，返回值是正文累积", async () => {
+    const deltas: { kind: string; text: string }[] = []
+    const sse = [
+      'data: {"choices":[{"delta":{"reasoning_content":"先看 diff。"}}]}',
+      'data: {"choices":[{"delta":{"content":"feat: 加"}}]}',
+      'data: {"choices":[{"delta":{"content":"流式"}}]}',
+      'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}',
+      "data: [DONE]",
+      "",
+    ].join("\n\n")
+    const fetchImpl = async () => ({
+      status: 200,
+      headers: { get: () => "text/event-stream" },
+      text: async () => sse,
+      json: async () => {
+        throw new Error("不该走 JSON")
+      },
+      body: new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode(sse))
+          controller.close()
+        },
+      }),
+    })
+
+    const result = await generateCommitMessage("d", CFG, { fetchImpl, onDelta: (delta) => deltas.push(delta) })
+    expect(result).toBe("feat: 加流式")
+    expect(deltas).toEqual([
+      { kind: "thinking", text: "先看 diff。" },
+      { kind: "text", text: "feat: 加" },
+      { kind: "text", text: "流式" },
+    ])
+  })
+
+  it("SSE：内联 <think> 被分流到思考（含标签跨 chunk）", async () => {
+    const deltas: { kind: string; text: string }[] = []
+    const sse = [
+      'data: {"choices":[{"delta":{"content":"<thi"}}]}',
+      'data: {"choices":[{"delta":{"content":"nk>想完了</think>fix: 好"}}]}',
+      "data: [DONE]",
+      "",
+    ].join("\n\n")
+    const fetchImpl = async () => ({
+      status: 200,
+      headers: { get: () => "text/event-stream" },
+      text: async () => sse,
+      json: async () => {
+        throw new Error("不该走 JSON")
+      },
+      body: new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode(sse))
+          controller.close()
+        },
+      }),
+    })
+
+    const result = await generateCommitMessage("d", CFG, { fetchImpl, onDelta: (delta) => deltas.push(delta) })
+    expect(result).toBe("fix: 好")
+    expect(deltas.filter((item) => item.kind === "thinking").map((item) => item.text).join("")).toBe("想完了")
+  })
+
+  it("SSE：坏 JSON chunk 被跳过，不影响后续", async () => {
+    const sse = [
+      "data: {坏",
+      'data: {"choices":[{"delta":{"content":"ok"}}]}',
+      "data: [DONE]",
+      "",
+    ].join("\n\n")
+    const fetchImpl = async () => ({
+      status: 200,
+      headers: { get: () => "text/event-stream" },
+      text: async () => sse,
+      json: async () => {
+        throw new Error("不该走 JSON")
+      },
+      body: new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode(sse))
+          controller.close()
+        },
+      }),
+    })
+    expect(await generateCommitMessage("d", CFG, { fetchImpl })).toBe("ok")
+  })
+
+  it("SSE：content-type 是 event-stream 但整段其实是 JSON 时兜底", async () => {
+    const json = '{"choices":[{"message":{"content":"兜底成功"}}]}'
+    const fetchImpl = async () => ({
+      status: 200,
+      headers: { get: () => "text/event-stream" },
+      text: async () => json,
+      json: async () => {
+        throw new Error("不该走 JSON")
+      },
+      body: new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode(json))
+          controller.close()
+        },
+      }),
+    })
+    expect(await generateCommitMessage("d", CFG, { fetchImpl })).toBe("兜底成功")
+  })
+
+  it("非流式响应里的 <think> 也作为思考回调（不再静默丢弃）", async () => {
+    const deltas: { kind: string; text: string }[] = []
+    const { fetchImpl } = fakeFetch({ choices: [{ message: { content: "<think>想了</think>feat: 好" } }] })
+    const result = await generateCommitMessage("d", CFG, { fetchImpl, onDelta: (delta) => deltas.push(delta) })
+    expect(result).toBe("feat: 好")
+    expect(deltas).toEqual([
+      { kind: "thinking", text: "想了" },
+      { kind: "text", text: "feat: 好" },
+    ])
+  })
+
+  it("finish_reason 为 length 时通过 onFinish 回报", async () => {
+    const { fetchImpl } = fakeFetch({ choices: [{ message: { content: "半截" }, finish_reason: "length" }] })
+    let reason: string | null | undefined
+    await generateCommitMessage("d", CFG, { fetchImpl, onFinish: (info) => { reason = info.finishReason } })
+    expect(reason).toBe("length")
+  })
+
+  it("空闲超时：一段时间没有数据就中止并抛 reason 为 timeout", async () => {
+    const fetchImpl = async () => ({
+      status: 200,
+      headers: { get: () => "text/event-stream" },
+      text: async () => "",
+      json: async () => {
+        throw new Error("不该走 JSON")
+      },
+      body: new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"content":"a"}}]}\n\n'))
+          // 之后一直不给数据
+          void controller
+        },
+      }),
+    })
+    await expect(
+      generateCommitMessage("d", CFG, { fetchImpl, idleTimeoutMs: 30 }),
+    ).rejects.toMatchObject({ reason: "timeout" })
   })
 })
