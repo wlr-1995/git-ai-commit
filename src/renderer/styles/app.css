@@ -526,6 +526,17 @@ td.num {
   font-size: var(--font-size);
 }
 
+/* 复选框行：控件单独一列，说明跟在后面 —— 塞进 84px 的标签列会换行、破坏表单对齐 */
+.modal .field-control {
+  grid-template-columns: auto 1fr;
+}
+
+.modal .field-control input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  justify-self: start;
+}
+
 .modal input,
 .modal select {
   width: 100%;

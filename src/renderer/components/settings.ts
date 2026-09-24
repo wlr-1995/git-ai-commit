@@ -111,11 +111,9 @@ export function openSettingsDialog(options: SettingsDialogOptions): SettingsDial
           <label for="timeout">超时（秒）</label>
           <input id="timeout" type="number" min="1" max="600" value="${options.config.api.timeout}" />
         </div>
-        <div class="field">
-          <label for="enable-thinking">
-            <input id="enable-thinking" type="checkbox" ${options.config.api.enable_thinking ? "checked" : ""} />
-            启用思考模式（发送 enable_thinking）
-          </label>
+        <div class="field field-control">
+          <input id="enable-thinking" type="checkbox" ${options.config.api.enable_thinking ? "checked" : ""} />
+          <label for="enable-thinking">启用思考模式（发送 enable_thinking）</label>
         </div>
         <div class="validation" id="settings-validation"></div>
       </div>
