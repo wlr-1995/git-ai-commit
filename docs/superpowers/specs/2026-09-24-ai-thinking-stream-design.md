@@ -1,6 +1,6 @@
 # 流式显示 AI 思考 · 设计文档
 
-- 状态：待实施
+- 状态：已实施（本文已按实际实现回填；以代码为准）
 - 日期：2026-09-24
 - 前置：`2026-09-17-electron-rewrite-design.md`（本功能在其之上增量）
 
@@ -69,13 +69,27 @@
 ### 4.1 新增 `src/core/sse.ts`——字节流 → 事件
 
 ```ts
-export interface SseEvent { data: string }
-/** 把 SSE 字节流逐事件喂给 onEvent；返回时表示流正常结束。 */
+export interface SseReadResult {
+  /** 收到的 `data:` 事件数（`[DONE]` 不算） */
+  dataEvents: number
+  /** 累积的原文（供「content-type 说是 event-stream、其实是 JSON」兜底） */
+  raw: string
+}
+export interface SseReadOptions {
+  /** 每读到一块字节回调一次（空闲超时靠它重置计时） */
+  onActivity?: () => void
+  /** 中止时取消读流，让挂着的 read() 立刻收尾 */
+  signal?: AbortSignal
+}
+/** 把 SSE 字节流逐事件喂给 onData；返回时表示流正常结束。 */
 export async function readSseStream(
   body: ReadableStream<Uint8Array>,
-  onEvent: (event: SseEvent) => void,
-): Promise<{ malformed: number }>
+  onData: (data: string) => void,
+  options?: SseReadOptions,
+): Promise<SseReadResult>
 ```
+
+**职责边界**：SSE 层只管切帧，`onData` 拿到的就是 `data:` 后的原始字符串；**不做 JSON 解析**——JSON 解析、坏帧的跳过（不抛）都在 `ai.ts`（见 §4.3）。`signal` 中止时取消读流，否则永不 close 的流会让空闲超时一直等下去。
 
 规则（逐条都要单测）：
 
@@ -120,22 +134,30 @@ export interface GenerateOptions {
   signal?: AbortSignal
   fetchImpl?: FetchLike
   onDelta?: (delta: AiDelta) => void
+  /** 流结束时的元信息（`finish_reason`）；**返回值仍是 `string`**，既有调用方不用动 */
+  onFinish?: (info: { finishReason: string | null }) => void
   /** 空闲超时（毫秒）：这么久没收到任何字节才算超时。默认沿用 cfg.timeout 秒。 */
   idleTimeoutMs?: number
 }
 
+export type AiErrorReason = "aborted" | "timeout" | "http" | "bad_response" | "network"
+
 export class AIError extends Error {
   /** 供上层区分：取消不该当错误弹框 */
-  readonly reason: "aborted" | "timeout" | "http" | "bad_response" | "network"
+  readonly reason: AiErrorReason
+  /** 缺省 `"bad_response"` */
+  constructor(message: string, reason?: AiErrorReason)
 }
 ```
 
 - `FetchLike` 扩展为 `{ status, headers?, text(), json(), body? }`。**`body` 缺失即视为非流式**——现有单测只提供 `text`/`json`，因此它们会自然走非流式分支、断言不用改。
 - `generateCommitMessage` 一律发 `stream: true`，然后按响应判定：
-  - `Content-Type` 含 `text/event-stream` → 走 SSE（§4.1），每个 `delta` 交给 §4.4 路由；
-  - 否则 → 整体 `json()`，复用现有 `choices[0].message` 解析，把 `reasoning_content` / 内联 `<think>` 各发一次 `onDelta`（**非流式也不再静默丢弃思考**）；
-  - 兜底：SSE 模式下整条流零有效 chunk 且 body 能 `JSON.parse` → 按非流式再解析一次（覆盖 content-type 乱写的服务）。
+  - **非流式** ＝ `Content-Type` 含 `application/json` **或**响应没有 `body` → 整体 `json()`，复用现有 `choices[0].message` 解析，把 `reasoning_content` / 内联 `<think>` 各发一次 `onDelta`（**非流式也不再静默丢弃思考**）；
+  - 否则（`text/event-stream`）→ 走 SSE（§4.1），每个 `delta` 交给 §4.4 路由；
+  - 兜底：`event-stream` 但整条流一个 `data:` 都没收到（`dataEvents === 0`）→ 把累积的 `raw` 当 JSON 再试一次（覆盖 content-type 乱写的服务）。
 - 返回值仍是最终正文 `string`（= 流式累积的 text，两者按构造一致）。
+- `AiConfig.enable_thinking?: boolean` 是**可选**字段（缺省＝不发，既有单测的最小配置不用改）；`AppConfig.api.enable_thinking` 才是必填、有默认值（§6）。
+- `finish_reason` 经 `onFinish` 回报，**返回值仍是 `string`**——这样既有约 10 处 `expect(await generateCommitMessage(...)).toBe(...)` 断言无需改动。
 - `onDelta` 可不传（单测/其它调用方），不传就丢弃增量。
 - **每次请求新建一个 `ThinkSplitter`**；SSE 流结束时调一次 `flush()`，把结果按 `kind` 发出（防吞字）。
 - 非流式分支的两次增量顺序固定为**先 thinking 后 text**（与流式观察到的顺序一致）。
@@ -162,7 +184,8 @@ export class AIError extends Error {
   - `CHANNELS.aiDelta = "ai:delta"`；
   - `export interface AiDelta { kind: "thinking" | "text"; text: string }`（core 与三端共用，core 里 re-export）；
   - `IpcApi` 新增 `onAiDelta(cb: (delta: AiDelta) => void): void`。
-- `main/ipc.ts`：`aiGenerate` 里把 `onDelta` 接到 `win.webContents.send(CHANNELS.aiDelta, delta)`（只在窗口未销毁时发）。
+- `main/ipc.ts`：`aiGenerate` **返回体是 `{ message: string; truncated: boolean; thinking: string }`**（不是裸 `{ message }`）。`message` 是核心返回的最终正文；`truncated` 来自 `onFinish` 的 `finishReason === "length"`；**`thinking` 由主进程 handler 从它自己已经经手的 `onDelta` 里累积**（`delta.kind === "thinking"` 时拼接）。`onDelta` 同时把每条增量 `win.webContents.send(CHANNELS.aiDelta, delta)`（只在窗口未销毁时发）。
+  - **为什么主进程自己攒思考**：`src/core/ai.ts` **不**累积思考（其 `StreamState` 只有 `text` / `finishReason`）。非流式 JSON 响应下 `handle` 的 reply 会超过排队的 `ai:delta` 消息，渲染层的 `busy` 门会把这些思考增量丢掉；返回体带上 `thinking`，渲染层就能在成功时用返回值对账 `state.thinking` / `state.message`（§4.6）而自愈。**不得**用 `setImmediate` / sleep 之类的时序手法来缓解。
 - `preload/index.ts`：`onAiDelta(cb)` → `ipcRenderer.on(CHANNELS.aiDelta, (_e, delta) => cb(delta))`。**不提供取消订阅**（整程序生命周期只订阅一次，YAGNI）。
 - 取消映射为显式结果：用户 abort → `AIError(reason:"aborted")` → `guarded` 归一为 `{ ok: false, error: { code: "AI_CANCELLED", message: "已取消" } }`（`ErrorCode` 新增 `AI_CANCELLED`）。**渲染层见到 `AI_CANCELLED` 只改状态栏、不弹框。**
 
@@ -179,7 +202,9 @@ export class AIError extends Error {
   `kind:"thinking"` → 拼到 `thinking`；`kind:"text"` → 拼到 `message`。**思考永远不进 `message`。**
 - `renderer/main.ts`：
   - `generate()` 开头 `state.thinking = ""`（每次生成重置，避免上一轮思考残留）；`state.message` 保持现状（会被流式正文逐步覆盖）；
-  - 启动时 `api.onAiDelta((delta) => { const next = applyAiDelta(state, delta); state.thinking = next.thinking; state.message = next.message; paint() })`（`state.busy === "generate"` 时才处理，防迟到增量）。
+  - `generate()` 成功后**用返回值对账**：`state.message = result.value.message`、`state.thinking = result.value.thinking`（非流式 JSON 下迟到的 `ai:delta` 可能被 `busy` 门丢弃，这里兜底自愈；**不得**用 `setImmediate` / sleep 之类的时序手法替代）；
+  - 启动时 `api.onAiDelta((delta) => { const next = applyAiDelta(state, delta); state.thinking = next.thinking; state.message = next.message; paint() })`（`applyDelta` 里仍保留 `state.busy === "generate"` 门）。
+  - **门的角色已退化**：它不再是「思考不丢」的正确性保证，而只是「**旧 run 的迟到增量不得污染新一轮**」的护栏；思考的最终正确性由上面的返回值对账兜底（§5.2 与验收标准 4）。
 - `renderer/global.d.ts`：`window.api` 的类型同步加 `onAiDelta`。
 - `renderer/render.ts`：
   - `#thinking` 的 `hidden` = `state.thinking === ""`；文本用 `textContent` 写入 `#thinking-body`；
@@ -231,6 +256,7 @@ export class AIError extends Error {
 ## 6. 配置与文档
 
 - `core/config.ts`：`AppConfig.api.enable_thinking: boolean`，默认 `false`；`deepMerge` 自动补齐旧配置文件。
+- 设置弹层的复选框行用 `.field.field-control`（`grid-template-columns: auto 1fr` + 复选框尺寸覆盖），不要塞进默认两栏表单的 84px 标签列：那样「启用思考模式（发送 enable_thinking）」会被折成三行、破坏表单对齐（实现期用截图发现并修的）。
 - `README.md` 更新：`api.enable_thinking` 进配置表；`api.timeout` 措辞改为「空闲超时」；「使用」一节的「AI 生成」条目补流式正文 + 思考区说明（含「非思考版模型不会出现思考区」）。
 - 思考内容**只在内存与界面**，不落盘、不写进提交信息。
 
@@ -241,7 +267,7 @@ export class AIError extends Error {
 - `tests/core/sse.test.ts`：
   - **中文/emoji 跨 chunk**：把 `data: {"content":"你好🚀"}` 的字节流在**每个位置**切开，断言事件文本恒定、无 `U+FFFD`；
   - `\r\n` 与 `\n` 混用、结尾无换行、空行、`:` 心跳、`event:`/`id:` 行；
-  - `[DONE]` 结束；坏 JSON 只累加 `malformed` 不抛；多个事件一 chunk；一个事件跨多 chunk。
+  - `[DONE]` 结束；坏 JSON 不归 SSE 层管（`ai.ts` 跳过、不抛）；返回 `dataEvents` 与累积 `raw`；`signal` 中止时取消读流且不把半行当事件；多个事件一 chunk；一个事件跨多 chunk。
 - `tests/core/think.test.ts`：
   - 穷举切分：对一段含 `<think>` 的中文文本，**在每个位置切成 1..n 个 chunk**，断言 `thinking` / `text` 拼接结果与整段单次 `push` 完全一致；
   - 未闭合 `<think>`（流结束）→ 已收部分是思考、`pending` 归思考；
