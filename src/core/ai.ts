@@ -95,7 +95,6 @@ export interface GenerateOptions {
 
 interface StreamState {
   text: string
-  thinking: string
   finishReason: string | null
 }
 
@@ -151,6 +150,8 @@ export async function generateCommitMessage(
   }
   const signals: AbortSignal[] = [controller.signal]
   if (options.signal) signals.push(options.signal)
+  // 组合一次、两处共用：用户取消要能同时打断 fetch 与读流（假 fetch 的 body 未必接信号）
+  const combinedSignal = AbortSignal.any(signals)
 
   const fetchImpl: FetchLike = options.fetchImpl ?? ((input, init) => fetch(input, init))
   armIdle()
@@ -161,12 +162,13 @@ export async function generateCommitMessage(
       method: "POST",
       headers,
       body: JSON.stringify(payload),
-      signal: AbortSignal.any(signals),
+      signal: combinedSignal,
     })
   } catch (error) {
     stopIdle()
-    if (timedOut) throw new AIError(idleText, "timeout")
+    // 取消优先于超时：误把「用户取消」当超时会弹错误框
     if (options.signal?.aborted) throw new AIError("已取消", "aborted")
+    if (timedOut) throw new AIError(idleText, "timeout")
     // Node 的 fetch 只抛 "fetch failed"，真正的原因（ECONNREFUSED 等）在 cause 里
     const cause = (error as { cause?: { message?: string } }).cause?.message
     const message = cause ?? (error instanceof Error ? error.message : String(error))
@@ -179,7 +181,7 @@ export async function generateCommitMessage(
     throw new AIError(`AI 返回 ${response.status}：${text.slice(0, 500)}`, "http")
   }
 
-  const state: StreamState = { text: "", thinking: "", finishReason: null }
+  const state: StreamState = { text: "", finishReason: null }
   const splitter = createThinkSplitter()
   const emit = (kind: AiDelta["kind"], text: string): void => {
     if (text === "") return
@@ -196,14 +198,12 @@ export async function generateCommitMessage(
     if (piece) {
       const reasoning = firstString(piece, ["reasoning_content", "reasoning"])
       if (reasoning !== "") {
-        state.thinking += reasoning
         emit("thinking", reasoning)
       }
       const content = firstString(piece, ["content"])
       if (content !== "") {
         const parts: ThinkParts = splitter.push(content)
         if (parts.thinking !== "") {
-          state.thinking += parts.thinking
           emit("thinking", parts.thinking)
         }
         if (parts.text !== "") {
@@ -251,31 +251,33 @@ export async function generateCommitMessage(
 
   try {
     if (usesJson) {
+      // 非流式没有逐块活动可重装计时器，这里量的是整段总时长；作为
+      // 「服务端不支持流式」的兜底路径，慢但持续产出的响应被误判超时可接受
       routeJson(await readJson())
     } else {
       const { dataEvents, raw } = await readSseStream(
         response.body as ReadableStream<Uint8Array>,
         onData,
-        { onActivity: armIdle, signal: controller.signal },
+        { onActivity: armIdle, signal: combinedSignal },
       )
       // 服务端把 content-type 写成 event-stream、其实整段是 JSON
       if (dataEvents === 0) routeJson(parseJson(raw))
     }
   } catch (error) {
     stopIdle()
-    if (timedOut) throw new AIError(idleText, "timeout")
     if (options.signal?.aborted) throw new AIError("已取消", "aborted")
+    if (timedOut) throw new AIError(idleText, "timeout")
     if (error instanceof AIError) throw error
     throw new AIError(`AI 请求失败：${error instanceof Error ? error.message : String(error)}`, "network")
   }
   stopIdle()
-  // 读流被取消（空闲超时）时 read() 是正常收尾而不是抛错，所以这里再确认一次
+  // 读流被取消（空闲超时/用户取消）时 read() 是正常收尾而不是抛错，所以这里再确认一次
+  if (options.signal?.aborted) throw new AIError("已取消", "aborted")
   if (timedOut) throw new AIError(idleText, "timeout")
 
   // 收尾：未决前缀按当前状态归还，避免吞字
   const tail = splitter.flush()
   if (tail.thinking !== "") {
-    state.thinking += tail.thinking
     emit("thinking", tail.thinking)
   }
   if (tail.text !== "") {

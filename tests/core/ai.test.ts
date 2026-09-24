@@ -316,4 +316,37 @@ describe("generateCommitMessage", () => {
       generateCommitMessage("d", CFG, { fetchImpl, idleTimeoutMs: 30 }),
     ).rejects.toMatchObject({ reason: "timeout" })
   })
+
+  it("流式中途取消：body 未接请求信号也判为 aborted", async () => {
+    const controller = new AbortController()
+    const deltas: { kind: string; text: string }[] = []
+    const fetchImpl = async () => ({
+      status: 200,
+      headers: { get: () => "text/event-stream" },
+      text: async () => "",
+      json: async () => {
+        throw new Error("不该走 JSON")
+      },
+      // 故意不把 body 接到请求信号：挂着的 read() 只能靠 readSseStream 的 signal 取消
+      body: new ReadableStream<Uint8Array>({
+        start(streamController) {
+          streamController.enqueue(
+            new TextEncoder().encode('data: {"choices":[{"delta":{"content":"半"}}]}\n\n'),
+          )
+          void streamController
+        },
+      }),
+    })
+
+    const pending = generateCommitMessage("d", CFG, {
+      fetchImpl,
+      signal: controller.signal,
+      onDelta: (delta) => {
+        deltas.push(delta)
+        if (deltas.length === 1) controller.abort()
+      },
+    })
+    await expect(pending).rejects.toMatchObject({ reason: "aborted" })
+    expect(deltas).toEqual([{ kind: "text", text: "半" }])
+  })
 })
