@@ -2,7 +2,7 @@ import type { AiDelta, DiffView, ThemeInfo } from "../shared/ipc"
 
 import { openSettingsDialog } from "./components/settings"
 import { showMessageDialog } from "./components/error-dialog"
-import { render, type Elements } from "./render"
+import { render, renderStream, type Elements } from "./render"
 import { applyAiDelta, applyFilter, checkedPaths, initialChecked, type FilterKind, type UiState } from "./state"
 
 const api = window.api
@@ -52,6 +52,7 @@ let repoPath = ""
 let diffRequest = 0
 let themes: ThemeInfo[] = []
 let streamStarted = false
+let generationRun = 0
 
 function repoName(): string {
   const parts = repoPath.split(/[\\/]/).filter(Boolean)
@@ -136,6 +137,7 @@ async function refresh(): Promise<void> {
     state.checked = initialChecked(result.value.changes, state.checkedByDefault)
     state.selectedPath = null
     diff = null
+    state.thinking = "" // 刷新=新上下文，上一轮的思考不再适用
     if (result.value.changes.length === 0) state.message = ""
   } else {
     state.changes = []
@@ -170,11 +172,13 @@ async function generate(): Promise<void> {
     showError("请先勾选至少一个文件")
     return
   }
+  const run = ++generationRun
   state.busy = "generate"
   state.thinking = ""
   streamStarted = false
   paint()
   const result = await api.aiGenerate(paths)
+  if (run !== generationRun) return // 已被后一轮取代：本轮结果作废，别再动 busy/界面
   state.busy = null
   if (result.ok) {
     // 以核心返回的最终文本为准（与流式累积一致，顺便对齐首尾空白）
@@ -202,7 +206,7 @@ function applyDelta(delta: AiDelta): void {
   const next = applyAiDelta(state, delta)
   state.thinking = next.thinking
   state.message = next.message
-  paint()
+  renderStream(state, elements)
 }
 
 async function cancelGeneration(): Promise<void> {

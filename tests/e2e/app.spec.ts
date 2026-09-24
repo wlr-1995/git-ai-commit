@@ -270,6 +270,7 @@ test("③ AI 生成：思考进思考区、正文进输入框（SSE，标签跨 
   await expect(window.locator("#status")).toContainText("已生成")
 
   // 真实链路发出去的提示词必须是新的结构化版本，且 diff 作为 user 消息
+  expect(calls).toHaveLength(1)
   const messages = (calls[0] as { messages: { role: string; content: string }[] }).messages
   expect((calls[0] as { model: string }).model).toBe("m")
   expect((calls[0] as { stream: boolean }).stream).toBe(true)

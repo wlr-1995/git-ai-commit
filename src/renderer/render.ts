@@ -138,6 +138,18 @@ export function render(state: UiState, elements: Elements, ctx: RenderContext): 
   }
 }
 
+/**
+ * 流式增量只更新会变的那几处：每个 token 都走整树重绘（表格 + diff 重建）会白烧 DOM。
+ * 这里刻意不碰 #status（生成中要保持「正在生成…」）与表格/diff。
+ */
+export function renderStream(state: UiState, elements: Elements): void {
+  if (elements.message.value !== state.message) elements.message.value = state.message
+  elements.message.readOnly = state.busy === "generate"
+  renderThinking(state, elements)
+  elements.hint.textContent = actionHint(state)
+  elements.btnCommit.disabled = !commitEnabled(state)
+}
+
 function renderDiff(state: UiState, elements: Elements, ctx: RenderContext): void {
   const diff = ctx.diff
   const hasDiff = Boolean(diff && state.selectedPath)
