@@ -16,6 +16,7 @@ export const DEFAULT_CONFIG: AppConfig = {
     max_tokens: 8192,
     language: "中文",
     timeout: 60,
+    enable_thinking: false,
   },
   git: { max_diff_lines: 200 },
   tools: { winmerge_path: "" },

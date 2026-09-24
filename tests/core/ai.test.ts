@@ -349,4 +349,14 @@ describe("generateCommitMessage", () => {
     await expect(pending).rejects.toMatchObject({ reason: "aborted" })
     expect(deltas).toEqual([{ kind: "text", text: "半" }])
   })
+
+  it("enable_thinking 为 true 时带 chat_template_kwargs，false/缺省时不带", async () => {
+    const enabled = fakeFetch({ choices: [{ message: { content: "ok" } }] })
+    await generateCommitMessage("d", { ...CFG, enable_thinking: true }, { fetchImpl: enabled.fetchImpl })
+    expect(body(enabled.calls[0])["chat_template_kwargs"]).toEqual({ enable_thinking: true })
+
+    const disabled = fakeFetch({ choices: [{ message: { content: "ok" } }] })
+    await generateCommitMessage("d", CFG, { fetchImpl: disabled.fetchImpl })
+    expect("chat_template_kwargs" in body(disabled.calls[0])).toBe(false)
+  })
 })

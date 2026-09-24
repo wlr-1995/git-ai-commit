@@ -41,6 +41,8 @@ export interface AiConfig {
   max_tokens: number
   language: string
   timeout: number
+  /** 是否随请求发 chat_template_kwargs.enable_thinking（可选，缺省不发） */
+  enable_thinking?: boolean
 }
 
 const THINK_RE = /<think>[\s\S]*?<\/think>/g
@@ -125,6 +127,8 @@ export async function generateCommitMessage(
   }
   const maxTokens = cfg.max_tokens || 0
   if (maxTokens > 0) payload.max_tokens = maxTokens
+  // 服务端专属参数默认一个都不发（严格实现会因未知字段 400），只在用户显式开启时才带
+  if (cfg.enable_thinking) payload.chat_template_kwargs = { enable_thinking: true }
 
   const headers: Record<string, string> = {
     "Content-Type": "application/json",

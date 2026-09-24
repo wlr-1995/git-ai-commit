@@ -98,6 +98,24 @@ describe("tools.winmerge_path", () => {
   })
 })
 
+describe("api.enable_thinking", () => {
+  it("默认配置里 enable_thinking 为 false（不发专属参数）", () => {
+    expect(DEFAULT_CONFIG.api.enable_thinking).toBe(false)
+  })
+
+  it("旧配置文件没有该键时回落 false", () => {
+    const cfgFile = join(makeTempDir(), "config.json")
+    writeFileSync(cfgFile, JSON.stringify({ api: { url: "http://x/v1" } }), "utf8")
+    expect(loadConfig(cfgFile).api.enable_thinking).toBe(false)
+  })
+
+  it("enable_thinking 能被读回", () => {
+    const cfgFile = join(makeTempDir(), "config.json")
+    writeFileSync(cfgFile, JSON.stringify({ api: { enable_thinking: true } }), "utf8")
+    expect(loadConfig(cfgFile).api.enable_thinking).toBe(true)
+  })
+})
+
 describe("saveConfig", () => {
   it("中文往返", () => {
     const cfgFile = join(makeTempDir(), "config.json")
@@ -126,6 +144,7 @@ describe("saveConfig", () => {
       max_tokens: 8192,
       language: "中文",
       timeout: 60,
+      enable_thinking: false,
     })
     expect(DEFAULT_CONFIG.git.max_diff_lines).toBe(200)
     // 窗口尺寸是 Electron 版独有的界面键：左右分栏需要更宽的开窗（Python 版是 720x520）

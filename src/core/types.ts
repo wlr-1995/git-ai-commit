@@ -37,6 +37,8 @@ export interface AppConfig {
     max_tokens: number
     language: string
     timeout: number
+    /** 是否随请求发 chat_template_kwargs.enable_thinking（Qwen3 在 SGLang 上有时需要） */
+    enable_thinking: boolean
   }
   git: { max_diff_lines: number }
   tools: { winmerge_path: string }
