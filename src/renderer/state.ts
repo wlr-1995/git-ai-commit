@@ -1,4 +1,5 @@
 import { ADDED, DELETED, MODIFIED, RENAMED, UNTRACKED, type FileChange } from "../shared/changes"
+import type { AiDelta } from "../shared/ipc"
 
 export type Busy = null | "refresh" | "generate" | "commit"
 
@@ -10,6 +11,8 @@ export interface UiState {
   stats: Record<string, [number | null, number | null]>
   checked: Set<string>
   message: string
+  /** AI 流式思考内容；空串表示没有（界面据此整块隐藏） */
+  thinking: string
   showUntracked: boolean
   checkedByDefault: string
   busy: Busy
@@ -72,4 +75,13 @@ export function applyFilter(state: UiState, kind: FilterKind): Set<string> {
     if (wanted.includes(change.status)) next.add(change.path)
   }
   return next
+}
+
+/** 把一条流式增量并进当前内容（纯函数，便于单测）。 */
+export function applyAiDelta(
+  current: { thinking: string; message: string },
+  delta: AiDelta,
+): { thinking: string; message: string } {
+  if (delta.kind === "thinking") return { ...current, thinking: current.thinking + delta.text }
+  return { ...current, message: current.message + delta.text }
 }

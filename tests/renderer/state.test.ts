@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest"
 import { ADDED, DELETED, MODIFIED, RENAMED, UNTRACKED } from "../../src/shared/changes"
 import {
   actionHint,
+  applyAiDelta,
   applyFilter,
   checkedPaths,
   commitEnabled,
@@ -26,6 +27,7 @@ function makeState(over: Partial<UiState> = {}): UiState {
     stats: {},
     checked: initialChecked(changes, policy),
     message: "",
+    thinking: "",
     showUntracked: false,
     checkedByDefault: policy,
     busy: null,
@@ -110,5 +112,27 @@ describe("summaryText / actionHint / commitEnabled", () => {
     const state = makeState({ changes: [], checked: new Set(), message: "x" })
     expect(commitEnabled(state)).toBe(false)
     expect(actionHint(state)).toBe("")
+  })
+})
+
+describe("applyAiDelta", () => {
+  it("思考与正文各走各的，思考绝不进 message", () => {
+    const first = applyAiDelta({ thinking: "", message: "" }, { kind: "thinking", text: "先看 diff。" })
+    expect(first).toEqual({ thinking: "先看 diff。", message: "" })
+    const second = applyAiDelta(first, { kind: "text", text: "feat: 好" })
+    expect(second).toEqual({ thinking: "先看 diff。", message: "feat: 好" })
+  })
+
+  it("同种增量按到达顺序拼接", () => {
+    let current = { thinking: "", message: "" }
+    for (const delta of [
+      { kind: "text" as const, text: "feat: " },
+      { kind: "thinking" as const, text: "a" },
+      { kind: "text" as const, text: "流式" },
+      { kind: "thinking" as const, text: "b" },
+    ]) {
+      current = applyAiDelta(current, delta)
+    }
+    expect(current).toEqual({ thinking: "ab", message: "feat: 流式" })
   })
 })

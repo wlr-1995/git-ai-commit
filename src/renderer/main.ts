@@ -38,6 +38,7 @@ const state: UiState = {
   stats: {},
   checked: new Set(),
   message: "",
+  thinking: "",
   showUntracked: false,
   checkedByDefault: "tracked",
   busy: null,
