@@ -11,6 +11,7 @@ describe("buildSettingsValues", () => {
       timeout: 60,
       style: "light",
       winmergePath: "",
+      enableThinking: false,
     }) as { tools: { winmerge_path: string } }
     expect(values.tools.winmerge_path).toBe("")
   })
@@ -23,6 +24,7 @@ describe("buildSettingsValues", () => {
       timeout: 60,
       style: "light",
       winmergePath: "  D:\\W\\WinMergeU.exe  ",
+      enableThinking: false,
     }) as { tools: { winmerge_path: string } }
     expect(values.tools.winmerge_path).toBe("D:\\W\\WinMergeU.exe")
   })
@@ -35,11 +37,31 @@ describe("buildSettingsValues", () => {
       timeout: 42,
       style: "dark",
       winmergePath: "",
+      enableThinking: false,
     }) as {
-      api: { url: string; model: string; api_key: string; timeout: number }
+      api: { url: string; model: string; api_key: string; timeout: number; enable_thinking: boolean }
       ui: { style: string }
     }
-    expect(values.api).toEqual({ url: "http://x/v1", model: "m", api_key: "secret", timeout: 42 })
+    expect(values.api).toEqual({
+      url: "http://x/v1",
+      model: "m",
+      api_key: "secret",
+      timeout: 42,
+      enable_thinking: false,
+    })
     expect(values.ui).toEqual({ style: "dark" })
+  })
+
+  it("enableThinking 落盘为 api.enable_thinking", () => {
+    const values = buildSettingsValues({
+      url: "http://x/v1",
+      model: "m",
+      apiKey: "k",
+      timeout: 60,
+      style: "light",
+      winmergePath: "",
+      enableThinking: true,
+    }) as { api: { enable_thinking: boolean } }
+    expect(values.api.enable_thinking).toBe(true)
   })
 })

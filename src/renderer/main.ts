@@ -217,6 +217,7 @@ async function openSettings(): Promise<void> {
         model: config.value.api.model,
         api_key: config.value.api.api_key,
         timeout: config.value.api.timeout,
+        enable_thinking: config.value.api.enable_thinking,
       },
       ui: { style: config.value.ui.style },
       tools: { winmerge_path: config.value.tools.winmerge_path },

@@ -7,12 +7,19 @@ export interface SettingsValues {
   timeout: number
   style: string
   winmergePath: string
+  enableThinking: boolean
 }
 
-/** 只组装要落盘的键：api 四键 + ui.style + tools（其余配置由主进程 deepMerge 保留）。 */
+/** 只组装要落盘的键：api 五键 + ui.style + tools（其余配置由主进程 deepMerge 保留）。 */
 export function buildSettingsValues(input: SettingsValues): Record<string, unknown> {
   return {
-    api: { url: input.url, model: input.model, api_key: input.apiKey, timeout: input.timeout },
+    api: {
+      url: input.url,
+      model: input.model,
+      api_key: input.apiKey,
+      timeout: input.timeout,
+      enable_thinking: input.enableThinking,
+    },
     ui: { style: input.style },
     tools: { winmerge_path: input.winmergePath.trim() },
   }
@@ -31,7 +38,7 @@ export interface SettingsDialogHandles {
 
 export interface SettingsDialogOptions {
   config: {
-    api: { url: string; model: string; api_key: string; timeout: number }
+    api: { url: string; model: string; api_key: string; timeout: number; enable_thinking: boolean }
     ui: { style: string }
     tools: { winmerge_path: string }
   }
@@ -104,6 +111,12 @@ export function openSettingsDialog(options: SettingsDialogOptions): SettingsDial
           <label for="timeout">超时（秒）</label>
           <input id="timeout" type="number" min="1" max="600" value="${options.config.api.timeout}" />
         </div>
+        <div class="field">
+          <label for="enable-thinking">
+            <input id="enable-thinking" type="checkbox" ${options.config.api.enable_thinking ? "checked" : ""} />
+            启用思考模式（发送 enable_thinking）
+          </label>
+        </div>
         <div class="validation" id="settings-validation"></div>
       </div>
       <div class="modal-actions">
@@ -120,6 +133,7 @@ export function openSettingsDialog(options: SettingsDialogOptions): SettingsDial
   const keyInput = backdrop.querySelector<HTMLInputElement>("#api-key")!
   const timeoutInput = backdrop.querySelector<HTMLInputElement>("#timeout")!
   const winmergeInput = backdrop.querySelector<HTMLInputElement>("#winmerge-path")!
+  const thinkingInput = backdrop.querySelector<HTMLInputElement>("#enable-thinking")!
   const saveButton = backdrop.querySelector<HTMLButtonElement>("#settings-save")!
   const validation = backdrop.querySelector<HTMLElement>("#settings-validation")!
 
@@ -140,6 +154,7 @@ export function openSettingsDialog(options: SettingsDialogOptions): SettingsDial
       timeout: parseTimeout(timeoutInput.value),
       style: styleSelect.value,
       winmergePath: winmergeInput.value,
+      enableThinking: thinkingInput.checked,
     })
 
   const validate = (): boolean => {
