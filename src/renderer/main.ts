@@ -1,9 +1,9 @@
-import type { DiffView, ThemeInfo } from "../shared/ipc"
+import type { AiDelta, DiffView, ThemeInfo } from "../shared/ipc"
 
 import { openSettingsDialog } from "./components/settings"
 import { showMessageDialog } from "./components/error-dialog"
 import { render, type Elements } from "./render"
-import { applyFilter, checkedPaths, initialChecked, type FilterKind, type UiState } from "./state"
+import { applyAiDelta, applyFilter, checkedPaths, initialChecked, type FilterKind, type UiState } from "./state"
 
 const api = window.api
 
@@ -18,6 +18,8 @@ const elements: Elements = {
   repoPath: el("repo-path"),
   branch: el("branch"),
   message: el<HTMLTextAreaElement>("message"),
+  thinking: el<HTMLDetailsElement>("thinking"),
+  thinkingBody: el("thinking-body"),
   tbody: el("changes-body") as HTMLTableSectionElement,
   empty: el("empty-state"),
   hint: el("action-hint"),
@@ -168,17 +170,30 @@ async function generate(): Promise<void> {
     return
   }
   state.busy = "generate"
+  state.thinking = ""
   paint()
   const result = await api.aiGenerate(paths)
   state.busy = null
   if (result.ok) {
+    // 以核心返回的最终文本为准（与流式累积一致，顺便对齐首尾空白）
     state.message = result.value.message
     paint()
-    setStatus("已生成，可编辑后提交")
+    setStatus(result.value.truncated ? "已生成（输出被 max_tokens 截断）" : "已生成，可编辑后提交")
+  } else if (result.error.code === "AI_CANCELLED") {
+    paint()
+    setStatus("已取消（已保留已收到内容）")
   } else {
     paint()
     showError(result.error.message)
   }
+}
+
+function applyDelta(delta: AiDelta): void {
+  if (state.busy !== "generate") return
+  const next = applyAiDelta(state, delta)
+  state.thinking = next.thinking
+  state.message = next.message
+  paint()
 }
 
 async function cancelGeneration(): Promise<void> {
@@ -276,6 +291,7 @@ function bindNarrowMode(): void {
 }
 
 function bind(): void {
+  api.onAiDelta(applyDelta)
   elements.message.addEventListener("input", () => {
     state.message = elements.message.value
     paint()

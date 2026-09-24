@@ -7,6 +7,8 @@ export interface Elements {
   repoPath: HTMLElement
   branch: HTMLElement
   message: HTMLTextAreaElement
+  thinking: HTMLDetailsElement
+  thinkingBody: HTMLElement
   tbody: HTMLTableSectionElement
   empty: HTMLElement
   hint: HTMLElement
@@ -53,6 +55,9 @@ export function render(state: UiState, elements: Elements, ctx: RenderContext): 
   elements.branch.title = `当前分支：${state.branch}`
 
   if (elements.message.value !== state.message) elements.message.value = state.message
+  // 生成期间输入框只读：正文是流式写入的，别让 paint 冲掉用户正在打的字
+  elements.message.readOnly = state.busy === "generate"
+  renderThinking(state, elements)
   elements.showUntracked.checked = state.showUntracked
 
   const visible = visibleChanges(state)
@@ -177,4 +182,24 @@ function renderDiff(state: UiState, elements: Elements, ctx: RenderContext): voi
       return row
     }),
   )
+}
+
+function renderThinking(state: UiState, elements: Elements): void {
+  const details = elements.thinking
+  const body = elements.thinkingBody
+  const wasHidden = details.hidden
+  details.hidden = state.thinking === ""
+  if (state.thinking === "") return
+
+  // 用户翻到上面看的时候别把他拽回底部
+  const stick = body.scrollHeight - body.scrollTop - body.clientHeight < 24
+  if (body.textContent !== state.thinking) body.textContent = state.thinking
+
+  if (wasHidden) {
+    // 思考第一次出现时展开（之后尊重用户手动收起）
+    details.open = true
+    body.scrollTop = body.scrollHeight
+  } else if (state.busy === "generate" && stick) {
+    body.scrollTop = body.scrollHeight
+  }
 }

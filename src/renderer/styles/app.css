@@ -137,6 +137,32 @@ body {
   background: var(--bg);
 }
 
+#thinking {
+  border: 1px solid var(--thinking-border);
+  border-radius: var(--radius);
+  background: var(--thinking-bg);
+}
+
+#thinking > summary {
+  padding: var(--space-xs) var(--space-sm);
+  color: var(--text-muted);
+  font-size: var(--font-size-small);
+  cursor: pointer;
+  user-select: none;
+}
+
+#thinking-body {
+  margin: 0;
+  padding: var(--space-sm);
+  max-height: 160px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-small);
+  color: var(--thinking-fg);
+}
+
 #message:focus,
 .modal input:focus,
 .modal select:focus {

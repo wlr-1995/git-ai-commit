@@ -35,6 +35,9 @@
   --row-selected-bg: #eff6ff;
   --row-hover-bg: #f8fafc;
   --diff-hunk-bg: #f1f5f9;
+  --thinking-bg: var(--surface-muted);
+  --thinking-border: var(--border);
+  --thinking-fg: var(--text-muted);
   --note-bg: #fffbeb;
   --note-fg: #92400e;
   --shadow-popover: 0 8px 24px rgba(16, 24, 40, 0.12);
