@@ -94,17 +94,19 @@ export function registerIpc(win: BrowserWindow, repoRoot: string): void {
       if (!diffText.trim()) throw new AIError("勾选的文件没有可分析的改动")
       generation = new AbortController()
       let truncated = false
+      let thinking = ""
       try {
         const message = await generateCommitMessage(diffText, config.api, {
           signal: generation.signal,
           onDelta: (delta) => {
+            if (delta.kind === "thinking") thinking += delta.text
             if (!win.isDestroyed()) win.webContents.send(CHANNELS.aiDelta, delta)
           },
           onFinish: (info) => {
             truncated = info.finishReason === "length"
           },
         })
-        return { message, truncated }
+        return { message, truncated, thinking }
       } finally {
         generation = null
       }

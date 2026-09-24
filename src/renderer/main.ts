@@ -177,6 +177,8 @@ async function generate(): Promise<void> {
   if (result.ok) {
     // 以核心返回的最终文本为准（与流式累积一致，顺便对齐首尾空白）
     state.message = result.value.message
+    // 思考也以回执为准：非流式 JSON 的增量可能晚于回执到达而被 busy 门丢弃，这里兜底
+    state.thinking = result.value.thinking
     paint()
     setStatus(result.value.truncated ? "已生成（输出被 max_tokens 截断）" : "已生成，可编辑后提交")
   } else if (result.error.code === "AI_CANCELLED") {

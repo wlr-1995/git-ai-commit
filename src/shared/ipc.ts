@@ -38,7 +38,7 @@ export interface ThemeInfo {
 export interface IpcApi {
   repoLoad(): Promise<Result<RepoSnapshot>>
   diffRead(path: string): Promise<Result<DiffView>>
-  aiGenerate(paths: string[]): Promise<Result<{ message: string; truncated: boolean }>>
+  aiGenerate(paths: string[]): Promise<Result<{ message: string; truncated: boolean; thinking: string }>>
   /** 主进程推来的流式增量；整程序只订阅一次，不提供取消订阅 */
   onAiDelta(cb: (delta: AiDelta) => void): void
   aiCancel(): Promise<Result<void>>
